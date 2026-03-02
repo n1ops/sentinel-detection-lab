@@ -1,0 +1,67 @@
+// Name: Impossible Travel - Anomalous Sign-In Locations
+// MITRE: T1078 - Credential Access / Valid Accounts
+// Severity: High
+// Description: Detects a user signing in from two geographically distant locations within a short time window, indicating potential credential compromise or token theft.
+// Query Frequency: 1h
+// Query Period: 24h
+// Trigger: gt 0
+
+let timeframe = 24h;
+let max_travel_minutes = 60;  // Max time between logins to flag as impossible
+SigninLogs
+| where TimeGenerated >= ago(timeframe)
+| where ResultType == "0"  // Successful sign-ins only
+| where isnotempty(LocationDetails)
+| extend
+    City = tostring(LocationDetails.city),
+    State = tostring(LocationDetails.state),
+    Country = tostring(LocationDetails.countryOrRegion),
+    Latitude = toreal(LocationDetails.geoCoordinates.latitude),
+    Longitude = toreal(LocationDetails.geoCoordinates.longitude)
+| where isnotempty(Latitude) and isnotempty(Longitude)
+| order by UserPrincipalName asc, TimeGenerated asc
+| serialize
+| extend
+    PrevTime = prev(TimeGenerated, 1),
+    PrevLatitude = prev(Latitude, 1),
+    PrevLongitude = prev(Longitude, 1),
+    PrevCity = prev(City, 1),
+    PrevCountry = prev(Country, 1),
+    PrevIPAddress = prev(IPAddress, 1),
+    PrevUser = prev(UserPrincipalName, 1)
+| where UserPrincipalName == PrevUser  // Same user consecutive logins
+| extend
+    TimeDiffMinutes = datetime_diff('minute', TimeGenerated, PrevTime),
+    // Haversine-style approximate distance in km
+    LatDiff = radians(Latitude - PrevLatitude),
+    LonDiff = radians(Longitude - PrevLongitude),
+    AvgLat = radians((Latitude + PrevLatitude) / 2.0)
+| extend
+    ApproxDistanceKm = round(
+        6371.0 * 2.0 * asin(
+            sqrt(
+                pow(sin(LatDiff / 2.0), 2) +
+                cos(radians(PrevLatitude)) * cos(radians(Latitude)) * pow(sin(LonDiff / 2.0), 2)
+            )
+        ), 0)
+| where TimeDiffMinutes <= max_travel_minutes
+| where ApproxDistanceKm > 500  // More than 500 km apart
+| extend
+    RequiredSpeedKmh = iff(TimeDiffMinutes > 0, round(ApproxDistanceKm / (toreal(TimeDiffMinutes) / 60.0), 0), real(999999)),
+    Entity_Account = UserPrincipalName
+| where RequiredSpeedKmh > 900  // Faster than commercial flight
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    PreviousSignIn = PrevTime,
+    CurrentSignIn = TimeGenerated,
+    TimeDiffMinutes,
+    PreviousLocation = strcat(PrevCity, ", ", PrevCountry),
+    CurrentLocation = strcat(City, ", ", Country),
+    PreviousIP = PrevIPAddress,
+    CurrentIP = IPAddress,
+    ApproxDistanceKm,
+    RequiredSpeedKmh,
+    AppDisplayName,
+    Entity_Account
+| order by RequiredSpeedKmh desc

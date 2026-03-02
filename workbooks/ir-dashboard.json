@@ -1,0 +1,408 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "## Incident Response Dashboard\n\nReal-time visibility into security incidents, alert trends, MITRE ATT&CK coverage, and response metrics across the environment."
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "a2947571-0c68-4b18-9fb2-1d28d6f1b8ef",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 2592000000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                { "durationMs": 3600000, "createdTime": "2024-01-01T00:00:00Z", "isInitialTime": false, "grain": 1, "useDashboardTimeRange": false },
+                { "durationMs": 86400000, "createdTime": "2024-01-01T00:00:00Z", "isInitialTime": false, "grain": 1, "useDashboardTimeRange": false },
+                { "durationMs": 604800000, "createdTime": "2024-01-01T00:00:00Z", "isInitialTime": false, "grain": 1, "useDashboardTimeRange": false },
+                { "durationMs": 2592000000, "createdTime": "2024-01-01T00:00:00Z", "isInitialTime": false, "grain": 1, "useDashboardTimeRange": false },
+                { "durationMs": 7776000000, "createdTime": "2024-01-01T00:00:00Z", "isInitialTime": false, "grain": 1, "useDashboardTimeRange": false }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "b8c5e7d3-4a12-4f9e-8d6c-3e7a1b2c9d0f",
+            "version": "KqlParameterItem/1.0",
+            "name": "Severity",
+            "label": "Severity Filter",
+            "type": 2,
+            "isRequired": false,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "SecurityIncident\n| distinct Severity\n| order by Severity asc",
+            "value": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n### Incident Trends & Volume"
+      },
+      "name": "section-incident-trends"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityIncident\n| where TimeGenerated {TimeRange}\n| where '*' in ({Severity}) or Severity in ({Severity})\n| summarize IncidentCount = count() by bin(TimeGenerated, 1d), Severity\n| order by TimeGenerated asc, Severity asc",
+        "size": 0,
+        "title": "Incidents Over Time",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": [
+            "IncidentCount"
+          ],
+          "group": "Severity",
+          "seriesLabelSettings": [
+            {
+              "seriesName": "High",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "Medium",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Low",
+              "color": "yellow"
+            },
+            {
+              "seriesName": "Informational",
+              "color": "blue"
+            }
+          ],
+          "showLegend": true,
+          "ySettings": {
+            "min": 0
+          }
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "incidents-over-time"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityIncident\n| where TimeGenerated {TimeRange}\n| where Status == \"Closed\"\n| where isnotempty(ClosedTime) and isnotempty(CreatedTime)\n| extend MTTR_Hours = datetime_diff('hour', ClosedTime, CreatedTime)\n| summarize AvgMTTR_Hours = round(avg(MTTR_Hours), 1), MedianMTTR_Hours = round(percentile(MTTR_Hours, 50), 1), IncidentsClosed = count() by bin(TimeGenerated, 1d)\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "Mean Time To Resolve (MTTR) Trend",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "TimeGenerated",
+          "yAxis": [
+            "AvgMTTR_Hours",
+            "MedianMTTR_Hours"
+          ],
+          "seriesLabelSettings": [
+            {
+              "seriesName": "AvgMTTR_Hours",
+              "label": "Average MTTR (hours)",
+              "color": "blue"
+            },
+            {
+              "seriesName": "MedianMTTR_Hours",
+              "label": "Median MTTR (hours)",
+              "color": "green"
+            }
+          ],
+          "showLegend": true,
+          "showDataPoints": true,
+          "ySettings": {
+            "min": 0
+          }
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "mttr-trend"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n### Targeted Accounts & Alert Sources"
+      },
+      "name": "section-accounts-alerts"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityAlert\n| where TimeGenerated {TimeRange}\n| where isnotempty(Entities)\n| mv-expand todynamic(Entities)\n| where Entities.Type == \"account\"\n| extend AccountName = tostring(Entities.Name), AccountDomain = tostring(Entities.NTDomain), AccountUPN = tostring(Entities.UPNSuffix)\n| extend FullAccount = iff(isnotempty(AccountDomain), strcat(AccountDomain, \"\\\\\", AccountName), iff(isnotempty(AccountUPN), strcat(AccountName, \"@\", AccountUPN), AccountName))\n| where isnotempty(FullAccount)\n| summarize AlertCount = count(), DistinctAlertTypes = dcount(AlertName), Severities = make_set(AlertSeverity), LastSeen = max(TimeGenerated) by FullAccount\n| top 25 by AlertCount desc\n| project FullAccount, AlertCount, DistinctAlertTypes, Severities, LastSeen\n| order by AlertCount desc",
+        "size": 0,
+        "title": "Top Targeted Accounts",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "AlertCount",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "redGreen",
+                "compositeBarSettings": {
+                  "labelText": "",
+                  "columnSettings": []
+                }
+              }
+            },
+            {
+              "columnMatch": "DistinctAlertTypes",
+              "formatter": 1
+            },
+            {
+              "columnMatch": "Severities",
+              "formatter": 1
+            },
+            {
+              "columnMatch": "LastSeen",
+              "formatter": 6,
+              "formatOptions": {
+                "dateFormat": {
+                  "showUtcTime": false,
+                  "formatName": "shortDateTimeNoMsPattern"
+                }
+              }
+            }
+          ],
+          "sortBy": [
+            {
+              "itemKey": "AlertCount",
+              "sortOrder": 2
+            }
+          ],
+          "labelSettings": [
+            { "columnId": "FullAccount", "label": "Account" },
+            { "columnId": "AlertCount", "label": "Total Alerts" },
+            { "columnId": "DistinctAlertTypes", "label": "Unique Alert Types" },
+            { "columnId": "Severities", "label": "Severity Levels" },
+            { "columnId": "LastSeen", "label": "Last Seen" }
+          ]
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "top-targeted-accounts"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityAlert\n| where TimeGenerated {TimeRange}\n| summarize AlertCount = count(), DistinctAlerts = dcount(AlertName), LastAlert = max(TimeGenerated) by ProductName\n| order by AlertCount desc",
+        "size": 0,
+        "title": "Alert Source Distribution",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "piechart",
+        "chartSettings": {
+          "seriesLabelSettings": [],
+          "showLegend": true,
+          "showLabels": true,
+          "labelSettings": {
+            "showValue": true,
+            "showPercentage": true
+          }
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "alert-source-distribution"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n### MITRE ATT&CK Coverage & Open Incident Aging"
+      },
+      "name": "section-mitre-aging"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityAlert\n| where TimeGenerated {TimeRange}\n| where isnotempty(Tactics)\n| mv-expand todynamic(Tactics)\n| extend Tactic = tostring(Tactics)\n| where isnotempty(Tactic)\n| join kind=inner (\n    SecurityAlert\n    | where TimeGenerated {TimeRange}\n    | where isnotempty(Techniques)\n    | mv-expand todynamic(Techniques)\n    | extend Technique = tostring(Techniques)\n    | where isnotempty(Technique)\n    | mv-expand todynamic(Tactics)\n    | extend Tactic = tostring(Tactics)\n) on Tactic\n| summarize ActiveDetections = dcount(AlertName), TotalAlerts = count(), UniqueEntities = dcount(Entities), LastTriggered = max(TimeGenerated) by Tactic, Technique\n| order by Tactic asc, TotalAlerts desc",
+        "size": 0,
+        "title": "MITRE ATT&CK Coverage",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ActiveDetections",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "blue",
+                "compositeBarSettings": {
+                  "labelText": "",
+                  "columnSettings": []
+                }
+              }
+            },
+            {
+              "columnMatch": "TotalAlerts",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "orange",
+                "compositeBarSettings": {
+                  "labelText": "",
+                  "columnSettings": []
+                }
+              }
+            },
+            {
+              "columnMatch": "LastTriggered",
+              "formatter": 6,
+              "formatOptions": {
+                "dateFormat": {
+                  "showUtcTime": false,
+                  "formatName": "shortDateTimeNoMsPattern"
+                }
+              }
+            }
+          ],
+          "hierarchySettings": {
+            "treeType": 1,
+            "groupBy": [
+              "Tactic"
+            ]
+          },
+          "sortBy": [
+            {
+              "itemKey": "TotalAlerts",
+              "sortOrder": 2
+            }
+          ],
+          "labelSettings": [
+            { "columnId": "Tactic", "label": "MITRE Tactic" },
+            { "columnId": "Technique", "label": "Technique ID" },
+            { "columnId": "ActiveDetections", "label": "Active Detections" },
+            { "columnId": "TotalAlerts", "label": "Total Alerts" },
+            { "columnId": "UniqueEntities", "label": "Unique Entities" },
+            { "columnId": "LastTriggered", "label": "Last Triggered" }
+          ]
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "mitre-attack-coverage"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityIncident\n| where Status != \"Closed\"\n| where TimeGenerated {TimeRange}\n| where '*' in ({Severity}) or Severity in ({Severity})\n| extend AgeInDays = datetime_diff('day', now(), CreatedTime)\n| extend AgeBucket = case(\n    AgeInDays <= 1, \"0-1 days\",\n    AgeInDays <= 3, \"1-3 days\",\n    AgeInDays <= 7, \"3-7 days\",\n    \"7+ days\"\n)\n| extend AgeBucketSort = case(\n    AgeInDays <= 1, 1,\n    AgeInDays <= 3, 2,\n    AgeInDays <= 7, 3,\n    4\n)\n| summarize IncidentCount = count(), Titles = make_list(Title, 5) by AgeBucket, AgeBucketSort, Severity\n| order by AgeBucketSort asc, Severity asc\n| project-away AgeBucketSort",
+        "size": 0,
+        "title": "Open Incidents by Age",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "IncidentCount",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "aggregation": "Sum",
+                "compositeBarSettings": {
+                  "labelText": "",
+                  "columnSettings": []
+                }
+              }
+            },
+            {
+              "columnMatch": "AgeBucket",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  { "operator": "==", "thresholdValue": "0-1 days", "representation": "green", "text": "{0}{1}" },
+                  { "operator": "==", "thresholdValue": "1-3 days", "representation": "yellow", "text": "{0}{1}" },
+                  { "operator": "==", "thresholdValue": "3-7 days", "representation": "orange", "text": "{0}{1}" },
+                  { "operator": "==", "thresholdValue": "7+ days", "representation": "redBright", "text": "{0}{1}" },
+                  { "operator": "Default", "representation": "blue", "text": "{0}{1}" }
+                ]
+              }
+            },
+            {
+              "columnMatch": "Titles",
+              "formatter": 1
+            }
+          ],
+          "sortBy": [
+            {
+              "itemKey": "IncidentCount",
+              "sortOrder": 2
+            }
+          ],
+          "labelSettings": [
+            { "columnId": "AgeBucket", "label": "Age" },
+            { "columnId": "Severity", "label": "Severity" },
+            { "columnId": "IncidentCount", "label": "Count" },
+            { "columnId": "Titles", "label": "Sample Incidents" }
+          ]
+        },
+        "tileSettings": {
+          "showBorder": true
+        }
+      },
+      "customWidth": "50",
+      "name": "open-incidents-by-age"
+    }
+  ],
+  "fallbackResourceIds": [
+    "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.OperationalInsights/workspaces/{workspace}"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
+  "styleSettings": {
+    "spacingStyle": "narrow"
+  }
+}

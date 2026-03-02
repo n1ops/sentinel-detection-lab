@@ -1,0 +1,11 @@
+title = "Sentinel Detection Lab - Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist for non-secret patterns"
+paths = [
+    '''\.terraform\.lock\.hcl$''',
+    '''\.tfstate$''',
+]

@@ -1,0 +1,2 @@
+# Development dependencies for CI/CD pipeline
+# No external packages required - validate_kql.py uses stdlib only

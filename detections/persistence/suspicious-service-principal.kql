@@ -1,0 +1,54 @@
+// Name: Suspicious Service Principal or App Registration Created
+// MITRE: T1136.003 - Persistence / Create Account: Cloud Account
+// Severity: Medium
+// Description: Detects creation of new service principals or application registrations in Azure AD, which attackers use to establish persistent backdoor access to cloud resources.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+AuditLogs
+| where TimeGenerated >= ago(timeframe)
+| where OperationName in (
+    "Add service principal",
+    "Add application",
+    "Add service principal credentials",
+    "Update application - Certificates and secrets management"
+)
+| where Result == "success"
+| extend
+    InitiatedBy_User = tostring(InitiatedBy.user.userPrincipalName),
+    InitiatedBy_App = tostring(InitiatedBy.app.displayName),
+    InitiatedBy_IP = tostring(InitiatedBy.user.ipAddress),
+    TargetResourceName = tostring(TargetResources[0].displayName),
+    TargetResourceId = tostring(TargetResources[0].id),
+    TargetResourceType = tostring(TargetResources[0].type)
+| extend
+    ModifiedProperties = parse_json(tostring(TargetResources[0].modifiedProperties))
+| extend
+    // Extract key details from modified properties
+    AppId = tostring(extract("\"AppId\"\\s*,\\s*\"newValue\"\\s*:\\s*\"([^\"]+)\"", 1, tostring(ModifiedProperties))),
+    KeyDescription = tostring(extract("\"KeyDescription\"\\s*,\\s*\"newValue\"\\s*:\\s*\"([^\"]+)\"", 1, tostring(ModifiedProperties)))
+| extend
+    Actor = iff(isnotempty(InitiatedBy_User), InitiatedBy_User, InitiatedBy_App),
+    IsCredentialOperation = OperationName in ("Add service principal credentials", "Update application - Certificates and secrets management")
+| extend
+    Entity_Account = Actor,
+    Entity_IP = InitiatedBy_IP,
+    Entity_App = TargetResourceName
+| project
+    TimeGenerated,
+    OperationName,
+    Actor,
+    InitiatedBy_IP,
+    TargetResourceName,
+    TargetResourceId,
+    TargetResourceType,
+    IsCredentialOperation,
+    AppId,
+    KeyDescription,
+    CorrelationId,
+    Entity_Account,
+    Entity_IP,
+    Entity_App
+| order by TimeGenerated desc

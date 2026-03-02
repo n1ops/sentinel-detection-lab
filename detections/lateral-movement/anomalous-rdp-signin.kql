@@ -1,0 +1,63 @@
+// Name: Anomalous RDP Sign-In Activity
+// MITRE: T1021.001 - Lateral Movement / Remote Desktop Protocol
+// Severity: Medium
+// Description: Detects RDP sign-ins from unusual source IPs or during off-hours (outside 06:00-20:00 local time), which may indicate lateral movement or unauthorized remote access.
+// Query Frequency: 1h
+// Query Period: 14d
+// Trigger: gt 0
+
+let timeframe = 14d;
+let detection_window = 1h;
+// Build a baseline of known RDP source IPs per user over the lookback period
+let rdp_baseline = materialize(
+    SigninLogs
+    | where TimeGenerated between (ago(timeframe) .. ago(detection_window))
+    | where AppDisplayName has "Windows Sign In" or ClientAppUsed == "Remote Desktop"
+    | where ResultType == "0"  // Successful only
+    | summarize KnownIPs = make_set(IPAddress, 100) by UserPrincipalName
+);
+// Current detection window
+SigninLogs
+| where TimeGenerated >= ago(detection_window)
+| where AppDisplayName has "Windows Sign In" or ClientAppUsed == "Remote Desktop"
+| where ResultType == "0"  // Successful sign-ins
+| extend
+    HourOfDay = hourofday(TimeGenerated),
+    DayOfWeek = dayofweek(TimeGenerated) / 1h / 24,
+    City = tostring(LocationDetails.city),
+    Country = tostring(LocationDetails.countryOrRegion)
+| extend
+    IsOffHours = HourOfDay < 6 or HourOfDay > 20,
+    IsWeekend = DayOfWeek == 0 or DayOfWeek == 6
+| join kind=leftouter (rdp_baseline) on UserPrincipalName
+| extend
+    IsNewSourceIP = not(set_has_element(KnownIPs, IPAddress)),
+    KnownIPs = iff(isempty(KnownIPs), dynamic([]), KnownIPs)
+| where IsNewSourceIP or IsOffHours or IsWeekend
+| extend
+    AnomalyReasons = bag_pack(
+        "NewSourceIP", IsNewSourceIP,
+        "OffHoursLogin", IsOffHours,
+        "WeekendLogin", IsWeekend
+    ),
+    AnomalyScore = toint(IsNewSourceIP) + toint(IsOffHours) + toint(IsWeekend),
+    Entity_Account = UserPrincipalName,
+    Entity_IP = IPAddress,
+    Entity_Host = DeviceDetail.displayName
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    IPAddress,
+    Location = strcat(City, ", ", Country),
+    HourOfDay,
+    IsNewSourceIP,
+    IsOffHours,
+    IsWeekend,
+    AnomalyReasons,
+    AnomalyScore,
+    AppDisplayName,
+    ConditionalAccessStatus,
+    Entity_Account,
+    Entity_IP,
+    Entity_Host
+| order by AnomalyScore desc, TimeGenerated desc

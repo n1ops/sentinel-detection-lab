@@ -1,0 +1,55 @@
+// Name: Suspicious Inbox Rule Creation Post-Phishing
+// MITRE: T1566.001 - Initial Access / Phishing
+// Severity: High
+// Description: Detects creation of inbox rules that move messages to obscure folders or delete items, which is common post-phishing behavior used to hide evidence of compromise.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+OfficeActivity
+| where TimeGenerated >= ago(timeframe)
+| where Operation == "New-InboxRule"
+| where RecordType == "ExchangeAdmin" or RecordType == "ExchangeItem"
+| extend
+    RuleParameters = tostring(Parameters)
+| extend
+    RuleName = extract("\"Name\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    MoveToFolder = extract("\"MoveToFolder\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    DeleteMessage = extract("\"DeleteMessage\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    MarkAsRead = extract("\"MarkAsRead\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    SubjectContains = extract("\"SubjectContainsWords\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    BodyContains = extract("\"BodyContainsWords\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    FromAddress = extract("\"From\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters)
+| where
+    // Flag rules that delete messages
+    DeleteMessage =~ "True"
+    // Or move to suspicious folders
+    or MoveToFolder has_any ("RSS Feeds", "RSS Subscriptions", "Deleted Items", "Junk Email", "Archive", "Conversation History")
+    // Or mark as read (to hide from user)
+    or MarkAsRead =~ "True"
+| extend
+    SuspiciousIndicators = bag_pack(
+        "DeletesMessages", DeleteMessage =~ "True",
+        "MovesToFolder", isnotempty(MoveToFolder),
+        "MarksAsRead", MarkAsRead =~ "True",
+        "TargetFolder", MoveToFolder
+    ),
+    Entity_Account = UserId,
+    Entity_IP = ClientIP
+| project
+    TimeGenerated,
+    UserId,
+    ClientIP,
+    RuleName,
+    MoveToFolder,
+    DeleteMessage,
+    MarkAsRead,
+    SubjectContains,
+    BodyContains,
+    FromAddress,
+    SuspiciousIndicators,
+    Operation,
+    Entity_Account,
+    Entity_IP
+| order by TimeGenerated desc

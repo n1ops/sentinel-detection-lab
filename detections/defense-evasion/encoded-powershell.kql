@@ -1,0 +1,66 @@
+// Name: Encoded PowerShell Command Execution
+// MITRE: T1027 - Defense Evasion / Obfuscated Files or Information
+// Severity: High
+// Description: Detects execution of PowerShell commands using encoding flags (-EncodedCommand, -enc, -e) or containing Base64-encoded payloads, commonly used to evade detection and obfuscate malicious scripts.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+// Match common Base64 patterns (minimum 40 chars of Base64 to reduce false positives)
+let base64_pattern = "[A-Za-z0-9+/]{40,}[=]{0,2}";
+SecurityEvent
+| where TimeGenerated >= ago(timeframe)
+| where EventID == 4688  // Process creation
+| where Process has_any ("powershell.exe", "pwsh.exe", "powershell_ise.exe")
+    or NewProcessName has_any ("powershell.exe", "pwsh.exe", "powershell_ise.exe")
+| extend CommandLine = iff(isnotempty(CommandLine), CommandLine, "")
+| where
+    // Detect encoded command flags (case-insensitive matching via has)
+    CommandLine matches regex @"(?i)\s+\-[eE][nN]?[cC]?\s+"
+    or CommandLine matches regex @"(?i)\-[Ee]ncoded[Cc]ommand\b"
+    // Detect common bypass techniques
+    or CommandLine matches regex @"(?i)\-[Ee]nc\b"
+    or CommandLine matches regex @"(?i)\-[Ee][Cc]\s+"
+    // Detect raw Base64 blobs in command line
+    or CommandLine matches regex base64_pattern
+    // Detect FromBase64String usage
+    or CommandLine has "FromBase64String"
+    or CommandLine has "[Convert]::FromBase64"
+    // Detect common download cradles with encoding
+    or (CommandLine has "Invoke-Expression" and CommandLine has "DownloadString")
+| extend
+    // Try to extract the encoded payload
+    EncodedPayload = extract(@"(?i)(?:\-[eE](?:[nN][cC]?|ncoded[cC]ommand))\s+([A-Za-z0-9+/=]+)", 1, CommandLine),
+    ParentProcess = ParentProcessName,
+    Entity_Account = Account,
+    Entity_Host = Computer
+| extend
+    // Decode Base64 if we captured it (best-effort)
+    DecodedCommand = iff(isnotempty(EncodedPayload), base64_decode_tostring(EncodedPayload), ""),
+    CommandLineLength = strlen(CommandLine),
+    HasDownloadCradle = CommandLine has_any ("DownloadString", "DownloadFile", "Invoke-WebRequest", "wget", "curl", "Net.WebClient"),
+    HasInvokeExpression = CommandLine has_any ("Invoke-Expression", "IEX", ".Invoke(")
+| extend
+    RiskIndicators = bag_pack(
+        "HasDownloadCradle", HasDownloadCradle,
+        "HasInvokeExpression", HasInvokeExpression,
+        "CommandLineLength", CommandLineLength,
+        "HasDecodablePayload", isnotempty(DecodedCommand)
+    )
+| project
+    TimeGenerated,
+    Computer,
+    Account,
+    NewProcessName,
+    ParentProcess,
+    CommandLine,
+    EncodedPayload,
+    DecodedCommand,
+    CommandLineLength,
+    RiskIndicators,
+    HasDownloadCradle,
+    HasInvokeExpression,
+    Entity_Account,
+    Entity_Host
+| order by TimeGenerated desc

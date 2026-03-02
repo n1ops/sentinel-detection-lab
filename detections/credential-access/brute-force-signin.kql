@@ -1,0 +1,40 @@
+// Name: Brute Force Sign-In Attempts
+// MITRE: T1110.001 - Credential Access / Brute Force
+// Severity: Medium
+// Description: Detects multiple failed sign-in attempts (>10) from a single IP address within 1 hour against Azure AD, indicating a potential brute force attack.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let failure_threshold = 10;
+let timeframe = 1h;
+SigninLogs
+| where TimeGenerated >= ago(timeframe)
+| where ResultType != "0"  // Non-zero ResultType indicates failure
+| where ResultType !in ("50125", "50140")  // Exclude interrupt/keep-alive codes
+| summarize
+    FailedAttempts = count(),
+    DistinctAccounts = dcount(UserPrincipalName),
+    TargetAccounts = make_set(UserPrincipalName, 25),
+    FirstAttempt = min(TimeGenerated),
+    LastAttempt = max(TimeGenerated),
+    ResultTypes = make_set(ResultType, 10),
+    UserAgents = make_set(UserAgent, 5)
+    by IPAddress, Location
+| where FailedAttempts > failure_threshold
+| extend
+    AttackDurationMinutes = datetime_diff('minute', LastAttempt, FirstAttempt),
+    Entity_IP = IPAddress
+| project
+    FirstAttempt,
+    LastAttempt,
+    IPAddress,
+    Location,
+    FailedAttempts,
+    DistinctAccounts,
+    TargetAccounts,
+    AttackDurationMinutes,
+    ResultTypes,
+    UserAgents,
+    Entity_IP
+| order by FailedAttempts desc

@@ -1,0 +1,50 @@
+// Name: Multi-Host Admin Logon (Privilege Escalation Sweep)
+// MITRE: T1078.002 - Lateral Movement / Valid Accounts: Domain Accounts
+// Severity: High
+// Description: Detects a single account being assigned special privileges (admin logon) across multiple hosts in a short period, indicating potential lateral movement or domain compromise.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+let host_threshold = 3;
+SecurityEvent
+| where TimeGenerated >= ago(timeframe)
+| where EventID == 4672  // Special privileges assigned to new logon
+| where Account !endswith "$"  // Exclude machine accounts
+| where Account !in ("NT AUTHORITY\\SYSTEM", "NT AUTHORITY\\LOCAL SERVICE", "NT AUTHORITY\\NETWORK SERVICE")
+| extend
+    AccountDomain = extract("^(.+)\\\\", 1, Account),
+    AccountName = extract("\\\\(.+)$", 1, Account)
+| summarize
+    DistinctHosts = dcount(Computer),
+    TargetHosts = make_set(Computer, 50),
+    TotalLogons = count(),
+    FirstLogon = min(TimeGenerated),
+    LastLogon = max(TimeGenerated),
+    PrivilegeList = make_set(PrivilegeList, 10),
+    LogonTypes = make_set(LogonType, 10)
+    by Account, AccountDomain, AccountName
+| where DistinctHosts > host_threshold
+| extend
+    SweepDurationMinutes = datetime_diff('minute', LastLogon, FirstLogon),
+    HostsPerMinute = iff(
+        datetime_diff('minute', LastLogon, FirstLogon) > 0,
+        round(toreal(DistinctHosts) / toreal(datetime_diff('minute', LastLogon, FirstLogon)), 2),
+        toreal(DistinctHosts)
+    ),
+    Entity_Account = Account
+| project
+    FirstLogon,
+    LastLogon,
+    Account,
+    AccountDomain,
+    AccountName,
+    DistinctHosts,
+    TargetHosts,
+    TotalLogons,
+    SweepDurationMinutes,
+    HostsPerMinute,
+    LogonTypes,
+    Entity_Account
+| order by DistinctHosts desc

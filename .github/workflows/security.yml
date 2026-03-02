@@ -1,0 +1,18 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security:
+    uses: n1ops/devsecops-pipeline-reference/.github/workflows/reusable-pipeline.yml@main
+    with:
+      language: python
+      runtime-version: "3.11"
+      install-command: "pip install -r requirements-dev.txt"
+      test-command: "python scripts/validate_kql.py"
+      terraform-directory: "terraform/"
+    secrets: inherit

@@ -1,0 +1,77 @@
+name: Sentinel Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'detections/**/*.kql'
+      - 'playbooks/**/*.json'
+      - 'terraform/**/*.tf'
+
+jobs:
+  validate-kql:
+    name: Validate KQL Detections
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate KQL metadata and syntax
+        run: python scripts/validate_kql.py
+
+  validate-arm:
+    name: Validate ARM Templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        continue-on-error: true
+
+      - name: Validate ARM templates
+        run: |
+          for template in $(find playbooks -name "azuredeploy.json" 2>/dev/null); do
+            echo "Validating $template..."
+            python -c "
+          import json, sys
+          try:
+              with open('$template') as f:
+                  data = json.load(f)
+              required = ['\$schema', 'contentVersion', 'parameters', 'resources']
+              missing = [k for k in required if k not in data]
+              if missing:
+                  print(f'ERROR: Missing required fields: {missing}')
+                  sys.exit(1)
+              print(f'PASS: {len(data[\"resources\"])} resource(s) defined')
+          except json.JSONDecodeError as e:
+              print(f'ERROR: Invalid JSON - {e}')
+              sys.exit(1)
+          "
+          done
+
+  validate-terraform:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform Format Check
+        working-directory: terraform
+        run: terraform fmt -check -recursive

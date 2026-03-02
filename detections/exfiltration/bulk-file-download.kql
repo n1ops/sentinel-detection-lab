@@ -1,0 +1,55 @@
+// Name: Bulk File Download from SharePoint or OneDrive
+// MITRE: T1567 - Exfiltration / Exfiltration Over Web Service
+// Severity: Medium
+// Description: Detects bulk file download activity from SharePoint Online or OneDrive for Business, where a user downloads more than 50 files within 1 hour, indicating potential data exfiltration.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+let download_threshold = 50;
+OfficeActivity
+| where TimeGenerated >= ago(timeframe)
+| where Operation in ("FileDownloaded", "FileSyncDownloadedFull")
+| where RecordType in ("SharePointFileOperation", "OneDriveForBusinessFileOperation", "6")  // SharePoint and OneDrive record types
+| extend
+    FileName = OfficeObjectId,
+    FileExtension = extract("\\.([^.]+)$", 1, OfficeObjectId),
+    SiteName = Site_Url
+| summarize
+    DownloadCount = count(),
+    DistinctFiles = dcount(OfficeObjectId),
+    DistinctSites = dcount(Site_Url),
+    Sites = make_set(Site_Url, 10),
+    FileExtensions = make_set(FileExtension, 20),
+    SampleFiles = make_set(OfficeObjectId, 10),
+    FirstDownload = min(TimeGenerated),
+    LastDownload = max(TimeGenerated),
+    SourceIPs = make_set(ClientIP, 5),
+    UserAgents = make_set(UserAgent, 3)
+    by UserId
+| where DownloadCount > download_threshold
+| extend
+    DownloadDurationMinutes = datetime_diff('minute', LastDownload, FirstDownload),
+    DownloadsPerMinute = iff(
+        datetime_diff('minute', LastDownload, FirstDownload) > 0,
+        round(toreal(DownloadCount) / toreal(datetime_diff('minute', LastDownload, FirstDownload)), 2),
+        toreal(DownloadCount)
+    ),
+    Entity_Account = UserId
+| project
+    FirstDownload,
+    LastDownload,
+    UserId,
+    DownloadCount,
+    DistinctFiles,
+    DistinctSites,
+    DownloadDurationMinutes,
+    DownloadsPerMinute,
+    Sites,
+    FileExtensions,
+    SampleFiles,
+    SourceIPs,
+    UserAgents,
+    Entity_Account
+| order by DownloadCount desc

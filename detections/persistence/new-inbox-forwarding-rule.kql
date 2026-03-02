@@ -1,0 +1,54 @@
+// Name: Email Forwarding Rule to External Address
+// MITRE: T1137.005 - Persistence / Office Application Startup
+// Severity: Medium
+// Description: Detects creation of email forwarding rules that redirect messages to external addresses, commonly used by attackers to maintain persistent access to email communications.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+// Define your organization's accepted domains
+let internal_domains = dynamic(["yourdomain.com", "yourdomain.onmicrosoft.com"]);
+OfficeActivity
+| where TimeGenerated >= ago(timeframe)
+| where Operation in ("Set-Mailbox", "New-InboxRule", "Set-InboxRule", "Enable-InboxRule")
+| extend RuleParameters = tostring(Parameters)
+| extend
+    ForwardTo = extract("\"ForwardTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    ForwardAsAttachmentTo = extract("\"ForwardAsAttachmentTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    RedirectTo = extract("\"RedirectTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    ForwardingSmtpAddress = extract("\"ForwardingSmtpAddress\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    DeliverToMailboxAndForward = extract("\"DeliverToMailboxAndForward\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+    RuleName = extract("\"Name\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters)
+| extend
+    ForwardingAddress = coalesce(ForwardTo, ForwardAsAttachmentTo, RedirectTo, ForwardingSmtpAddress)
+| where isnotempty(ForwardingAddress)
+| extend
+    ForwardingDomain = extract("@(.+)$", 1, ForwardingAddress)
+| where isnotempty(ForwardingDomain)
+// Flag external forwarding - address domain not in internal domains list
+| where not(ForwardingDomain has_any (internal_domains))
+| extend
+    ForwardingType = case(
+        isnotempty(ForwardTo), "ForwardTo",
+        isnotempty(ForwardAsAttachmentTo), "ForwardAsAttachment",
+        isnotempty(RedirectTo), "RedirectTo",
+        isnotempty(ForwardingSmtpAddress), "SmtpForwarding",
+        "Unknown"
+    ),
+    Entity_Account = UserId,
+    Entity_IP = ClientIP
+| project
+    TimeGenerated,
+    UserId,
+    ClientIP,
+    Operation,
+    RuleName,
+    ForwardingAddress,
+    ForwardingDomain,
+    ForwardingType,
+    DeliverToMailboxAndForward,
+    RuleParameters,
+    Entity_Account,
+    Entity_IP
+| order by TimeGenerated desc

@@ -1,0 +1,67 @@
+// Name: Email Auto-Forwarding to External Domain
+// MITRE: T1114.003 - Exfiltration / Email Collection: Email Forwarding Rule
+// Severity: High
+// Description: Detects email auto-forwarding configured to external domains via Set-Mailbox or transport rules, commonly used for persistent email exfiltration after account compromise.
+// Query Frequency: 1h
+// Query Period: 1h
+// Trigger: gt 0
+
+let timeframe = 1h;
+// Define your organization's internal/accepted domains
+let internal_domains = dynamic(["yourdomain.com", "yourdomain.onmicrosoft.com"]);
+// Detection 1: Mailbox-level forwarding via Set-Mailbox
+let mailbox_forwarding =
+    OfficeActivity
+    | where TimeGenerated >= ago(timeframe)
+    | where Operation == "Set-Mailbox"
+    | extend RuleParameters = tostring(Parameters)
+    | where RuleParameters has "ForwardingSmtpAddress" or RuleParameters has "ForwardTo"
+    | extend
+        ForwardingSmtpAddress = extract("\"ForwardingSmtpAddress\"\\s*:\\s*\"(?:smtp:)?([^\"]+)\"", 1, RuleParameters),
+        ForwardTo = extract("\"ForwardTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+        DeliverAndForward = extract("\"DeliverToMailboxAndForward\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters)
+    | extend
+        ForwardingAddress = coalesce(ForwardingSmtpAddress, ForwardTo)
+    | where isnotempty(ForwardingAddress)
+    | extend
+        ForwardingDomain = extract("@(.+)$", 1, ForwardingAddress)
+    | where isnotempty(ForwardingDomain)
+    | where not(ForwardingDomain has_any (internal_domains))
+    | extend Source = "Set-Mailbox";
+// Detection 2: Inbox rules with forwarding
+let inbox_rule_forwarding =
+    OfficeActivity
+    | where TimeGenerated >= ago(timeframe)
+    | where Operation in ("New-InboxRule", "Set-InboxRule")
+    | extend RuleParameters = tostring(Parameters)
+    | where RuleParameters has "ForwardTo" or RuleParameters has "ForwardAsAttachmentTo" or RuleParameters has "RedirectTo"
+    | extend
+        ForwardTo = extract("\"ForwardTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+        ForwardAsAttachment = extract("\"ForwardAsAttachmentTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters),
+        RedirectTo = extract("\"RedirectTo\"\\s*:\\s*\"([^\"]+)\"", 1, RuleParameters)
+    | extend
+        ForwardingAddress = coalesce(ForwardTo, ForwardAsAttachment, RedirectTo)
+    | where isnotempty(ForwardingAddress)
+    | extend
+        ForwardingDomain = extract("@(.+)$", 1, ForwardingAddress),
+        DeliverAndForward = ""
+    | where isnotempty(ForwardingDomain)
+    | where not(ForwardingDomain has_any (internal_domains))
+    | extend Source = "InboxRule";
+// Combine results
+union mailbox_forwarding, inbox_rule_forwarding
+| extend
+    Entity_Account = UserId,
+    Entity_IP = ClientIP
+| project
+    TimeGenerated,
+    UserId,
+    ClientIP,
+    Operation,
+    Source,
+    ForwardingAddress,
+    ForwardingDomain,
+    DeliverAndForward,
+    Entity_Account,
+    Entity_IP
+| order by TimeGenerated desc
