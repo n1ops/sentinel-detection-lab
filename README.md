@@ -2,6 +2,49 @@
 
 Detection-as-code framework for Microsoft Sentinel. Terraform deploys the Sentinel workspace, 12 analytics rules, and 3 automation rules. The repo also includes an IR playbook (ARM template) and dashboard (Workbook JSON) that require separate manual deployment steps documented below.
 
+## Overview
+
+This project implements a complete Security Operations Center (SOC) detection pipeline for Microsoft Sentinel using infrastructure-as-code principles. Every detection rule, automation workflow, and infrastructure component is version-controlled, validated in CI/CD, and deployed through Terraform — eliminating manual portal configuration and enabling detection engineering workflows through pull requests.
+
+### What this project does
+
+The core deployment (`terraform apply`) stands up a fully functional Sentinel environment from scratch:
+
+1. **A Log Analytics Workspace with Sentinel enabled** — The foundation. Azure Activity Logs (Administrative, Security, Alert, and Policy categories) are ingested automatically via a diagnostic setting on the subscription. Azure AD sign-in and audit logs require a P1/P2 license and are not enabled by default.
+
+2. **12 scheduled analytics rules covering 6 MITRE ATT&CK tactics** — Each rule is a standalone KQL query file in `detections/` that Terraform reads and deploys as a `azurerm_sentinel_alert_rule_scheduled` resource. The queries run on a 1-hour frequency against standard Sentinel tables (`SigninLogs`, `AuditLogs`, `OfficeActivity`, `SecurityEvent`) and generate alerts when thresholds are exceeded. Entity mappings (Account, IP, Host) are configured per rule so Sentinel can correlate alerts into incidents and display entity pages.
+
+3. **3 automation rules for incident triage** — High-severity incidents are automatically set to Active status. Incidents matching phishing techniques (T1566) are auto-tagged with `Phishing` and `InitialAccess` labels. Informational-severity incidents are auto-closed with a `BenignPositive_SuspiciousButExpected` classification. These run on every incident creation and reduce analyst toil for common triage decisions.
+
+4. **Incident grouping** — Each analytics rule is configured with alert grouping using the `AllEntities` matching method with a 5-hour lookback window. When the same account or IP triggers the same rule multiple times, Sentinel groups those alerts into a single incident rather than flooding the queue with duplicates.
+
+### What this project includes but does not auto-deploy
+
+The repository also contains two templates that require manual deployment:
+
+- **An IR playbook for phishing response** (`playbooks/phishing-response/azuredeploy.json`) — An ARM template defining a Logic App that triggers on Sentinel incident creation, extracts IP/Account/URL entities, posts a formatted enrichment report to a Microsoft Teams channel, adds a comment to the incident, and tags it with MITRE technique identifiers. This requires deploying the ARM template, authorizing the Teams and Sentinel API connections in the Azure Portal, and assigning the Sentinel Responder RBAC role to the Logic App's managed identity. Full steps are documented in the [IR Playbook](#ir-playbook-manual-deployment-required) section.
+
+- **An IR dashboard** (`workbooks/ir-dashboard.json`) — A Sentinel Workbook template with 6 KQL-powered visualization tiles (incident trends, targeted accounts, MITRE coverage, incident aging, alert sources, and mean time to resolve). This requires manual import through the Sentinel Portal's Workbook Advanced Editor. Full steps are documented in the [IR Dashboard](#ir-dashboard-manual-import-required) section.
+
+### How CI/CD works
+
+Every push to `main` and every pull request triggers two GitHub Actions workflows:
+
+- **`security.yml`** calls the [n1ops/devsecops-pipeline-reference](https://github.com/n1ops/devsecops-pipeline-reference) reusable pipeline, which runs Gitleaks (secret detection), CodeQL (static analysis), Checkov (Terraform IaC scanning), and the KQL validator as the test stage. This is the same pipeline used across all n1ops projects.
+
+- **`sentinel-validate.yml`** runs specifically on PRs that touch detection files, playbooks, or Terraform. It validates that all `.kql` files have required metadata headers (Name, MITRE, Severity, Description), validates ARM template JSON structure, and runs `terraform validate` + `terraform fmt -check`.
+
+The KQL validator (`scripts/validate_kql.py`) enforces a consistent metadata format across all detections: every `.kql` file must declare its name, MITRE technique ID (matching `T\d{4}` format), severity (one of Informational/Low/Medium/High), and a human-readable description. This ensures new detections can't be merged without proper documentation.
+
+### Why detection-as-code
+
+Traditional SOC workflows involve analysts creating detection rules manually in the Sentinel portal. This approach has problems: no version history, no peer review, no automated testing, and no way to reproduce the environment if the workspace is lost. By storing every rule as a `.kql` file and deploying through Terraform:
+
+- **New detections go through pull requests** — reviewed by the team, validated by CI, merged when approved
+- **Changes are tracked in git history** — who changed what, when, and why
+- **The entire environment is reproducible** — `terraform destroy` and `terraform apply` rebuilds everything from scratch
+- **Detection quality is enforced** — the validator rejects rules without MITRE mappings or proper metadata
+
 ## Architecture
 
 ```mermaid
