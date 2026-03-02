@@ -44,3 +44,7 @@ credentials.json
 
 # Claude
 .claude/
+
+# Audit reports
+SECURITY_AUDIT_REPORT.md
+REMEDIATION_CHANGELOG.md

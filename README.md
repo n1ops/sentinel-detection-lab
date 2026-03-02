@@ -89,7 +89,7 @@ graph TB
 
 ## Security
 
-This project has undergone a comprehensive security audit with 68 findings across Terraform, GitHub Actions, KQL detections, ARM templates, and git configuration. All actionable findings have been remediated. See [SECURITY_AUDIT_REPORT.md](./SECURITY_AUDIT_REPORT.md) for the full audit and [REMEDIATION_CHANGELOG.md](./REMEDIATION_CHANGELOG.md) for the detailed changelog.
+This project has undergone a comprehensive security audit with 68 findings across Terraform, GitHub Actions, KQL detections, ARM templates, and git configuration. All actionable findings have been remediated.
 
 Key security measures:
 
@@ -256,8 +256,7 @@ sentinel-detection-lab/
 │   ├── dependabot.yml                   # Weekly GitHub Actions updates
 │   └── CODEOWNERS                       # @n1ops review required
 ├── .gitleaks.toml                       # Custom Azure secret detection rules
-├── SECURITY_AUDIT_REPORT.md             # Comprehensive 68-finding audit
-└── REMEDIATION_CHANGELOG.md             # Detailed remediation changelog
+└── .gitleaks.toml                       # Custom Azure secret detection rules
 ```
 
 ## Detection Library
