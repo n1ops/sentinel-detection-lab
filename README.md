@@ -1,6 +1,6 @@
 # Sentinel Detection Lab
 
-Detection-as-code framework for Microsoft Sentinel, deploying analytics rules, incident response playbooks, and dashboards via Terraform with full CI/CD integration.
+Detection-as-code framework for Microsoft Sentinel. Terraform deploys the Sentinel workspace, 12 analytics rules, and 3 automation rules. The repo also includes an IR playbook (ARM template) and dashboard (Workbook JSON) that require separate manual deployment steps documented below.
 
 ## Architecture
 
@@ -14,16 +14,19 @@ graph TB
         GH --> TV[Terraform Validate]
     end
 
-    subgraph "Azure Subscription"
+    subgraph "Azure Subscription (deployed by Terraform)"
         RG[Resource Group]
         subgraph "Microsoft Sentinel"
             LAW[Log Analytics Workspace]
             DC[Data Connectors]
             AR[Analytics Rules<br/>12 Detections]
             AUTO[Automation Rules]
-            WB[IR Dashboard]
         end
+    end
+
+    subgraph "Manual Deployment (ARM/JSON templates in repo)"
         LA[Logic App<br/>Phishing Response]
+        WB[IR Dashboard<br/>Workbook]
     end
 
     subgraph "Data Sources"
@@ -37,22 +40,25 @@ graph TB
     DC --> LAW
     LAW --> AR
     AR -->|Incidents| AUTO
-    AR -->|Trigger| LA
+    AR -.->|Manual deploy| LA
+    LAW -.->|Manual import| WB
 ```
 
 ## Deployment Results
 
-This project was deployed and validated against a live Azure subscription. All 19 resources were successfully provisioned:
+This project was deployed and validated against a live Azure subscription. `terraform apply` provisions 19 resources automatically. The playbook and workbook are **not** deployed by Terraform — they are ARM/JSON templates that require separate manual steps.
 
-| Resource | Count | Status |
-|----------|-------|--------|
-| Resource Group (`rg-sentinel-lab`) | 1 | Deployed |
-| Log Analytics Workspace (PerGB2018, 31-day retention) | 1 | Deployed |
-| Sentinel Onboarding | 1 | Deployed |
-| Azure Activity Log Connector | 1 | Deployed |
-| Scheduled Analytics Rules | 12 | Deployed |
-| Automation Rules | 3 | Deployed |
-| **Total** | **19** | **All succeeded** |
+| Resource | Count | Deployed by | Status |
+|----------|-------|-------------|--------|
+| Resource Group (`rg-sentinel-lab`) | 1 | `terraform apply` | Deployed |
+| Log Analytics Workspace (PerGB2018, 31-day retention) | 1 | `terraform apply` | Deployed |
+| Sentinel Onboarding | 1 | `terraform apply` | Deployed |
+| Azure Activity Log Connector | 1 | `terraform apply` | Deployed |
+| Scheduled Analytics Rules | 12 | `terraform apply` | Deployed |
+| Automation Rules | 3 | `terraform apply` | Deployed |
+| Azure AD Connector | 1 | `terraform apply` | Requires P1/P2 license |
+| IR Playbook (Logic App) | 1 | Manual ARM deployment | Not deployed |
+| IR Dashboard (Workbook) | 1 | Manual Sentinel import | Not deployed |
 
 ### Azure AD Connector (Not Deployed)
 
@@ -165,10 +171,10 @@ sentinel-detection-lab/
 │   ├── lateral-movement/         # Anomalous RDP, multi-host admin
 │   ├── exfiltration/             # Bulk downloads, mail forwarding
 │   └── defense-evasion/          # Encoded PowerShell
-├── playbooks/                    # Incident response automation
-│   └── phishing-response/        # Logic App ARM template
-├── workbooks/                    # Sentinel dashboards
-│   └── ir-dashboard.json         # 6-tile IR dashboard
+├── playbooks/                    # Incident response automation (manual deploy)
+│   └── phishing-response/        # Logic App ARM template (not deployed by TF)
+├── workbooks/                    # Sentinel dashboards (manual import)
+│   └── ir-dashboard.json         # 6-tile IR dashboard (not deployed by TF)
 ├── scripts/
 │   └── validate_kql.py           # KQL metadata validator
 └── .github/workflows/
@@ -211,21 +217,51 @@ Runs on pull requests touching detections, playbooks, or Terraform:
 - Validates ARM template JSON structure
 - Runs `terraform validate` and `terraform fmt -check`
 
-## IR Playbook
+## IR Playbook (Manual Deployment Required)
 
-The phishing response playbook (`playbooks/phishing-response/azuredeploy.json`) is a Logic App that:
+> **Not deployed by `terraform apply`.** This is an ARM template that must be deployed separately.
+
+The file `playbooks/phishing-response/azuredeploy.json` is an ARM template that defines a Logic App. When deployed and fully configured, it:
 
 1. Triggers on Sentinel incident creation
-2. Extracts entities (IP, Account, URL)
-3. Posts enrichment details to a Teams channel
+2. Extracts entities (IP, Account, URL) via the Sentinel API connector
+3. Posts enrichment details to a Microsoft Teams channel
 4. Adds a comment to the Sentinel incident
-5. Tags the incident with MITRE technique identifiers
+5. Tags the incident with MITRE technique identifiers (T1566-Phishing)
 
-Deployment requires a managed identity with the **Microsoft Sentinel Responder** role on the workspace.
+### How to deploy the playbook
 
-## IR Dashboard
+```bash
+# Deploy the ARM template into the same resource group
+az deployment group create \
+  --resource-group rg-sentinel-lab \
+  --template-file playbooks/phishing-response/azuredeploy.json \
+  --parameters \
+    SentinelWorkspaceId="<your-workspace-resource-id>" \
+    TeamsChannelId="<your-teams-channel-id>" \
+    TeamsGroupId="<your-teams-group-id>"
+```
 
-The workbook (`workbooks/ir-dashboard.json`) provides 6 visualization tiles:
+### Post-deployment manual steps
+
+1. **Authorize the Teams API connection**: In the Azure Portal, go to the Logic App > API Connections > `teams` connection > Edit API connection > Authorize. This requires a user with access to the target Teams channel to sign in and grant consent.
+2. **Authorize the Sentinel API connection**: Same process for the `azuresentinel` connection, or it will use the Logic App's managed identity if the role is assigned.
+3. **Assign RBAC role**: The Logic App uses a SystemAssigned managed identity. Grant it the **Microsoft Sentinel Responder** role on the Sentinel workspace so it can read incidents, add comments, and update tags:
+   ```bash
+   az role assignment create \
+     --assignee "<logic-app-managed-identity-principal-id>" \
+     --role "Microsoft Sentinel Responder" \
+     --scope "<sentinel-workspace-resource-id>"
+   ```
+4. **Test the playbook**: Create a test incident in Sentinel and verify the Logic App triggers, posts to Teams, and adds a comment.
+
+Without these manual steps, the Logic App will deploy but will **not** be able to connect to Teams or interact with Sentinel incidents.
+
+## IR Dashboard (Manual Import Required)
+
+> **Not deployed by `terraform apply`.** This is a Workbook JSON template that must be imported manually into Sentinel.
+
+The file `workbooks/ir-dashboard.json` is a Sentinel Workbook template with 6 visualization tiles:
 
 1. **Incidents over time** — Bar chart by severity
 2. **Top targeted accounts** — Table of most-attacked users
@@ -234,17 +270,34 @@ The workbook (`workbooks/ir-dashboard.json`) provides 6 visualization tiles:
 5. **Alert source distribution** — Pie chart by product
 6. **MTTR trend** — Mean time to resolve over time
 
-## Terraform Resources
+### How to import the workbook
+
+1. Open the Azure Portal and navigate to **Microsoft Sentinel** > your workspace > **Workbooks**
+2. Click **Add workbook** > **Advanced Editor** (the `</>` icon)
+3. Replace the contents with the JSON from `workbooks/ir-dashboard.json`
+4. Update the `fallbackResourceIds` array at the bottom of the JSON to reference your actual workspace resource ID
+5. Click **Apply** then **Save**
+
+The workbook queries `SecurityIncident` and `SecurityAlert` tables, so it will only show data once incidents start being generated by the analytics rules.
+
+## What `terraform apply` Deploys
 
 | Resource | Type | Status |
 |----------|------|--------|
 | Resource Group | `azurerm_resource_group` | Deployed |
 | Log Analytics Workspace | `azurerm_log_analytics_workspace` | Deployed |
 | Sentinel Onboarding | `azurerm_sentinel_log_analytics_workspace_onboarding` | Deployed |
-| Azure AD Connector | `azurerm_sentinel_data_connector_azure_active_directory` | Requires P1/P2 |
+| Azure AD Connector | `azurerm_sentinel_data_connector_azure_active_directory` | Commented out (requires P1/P2) |
 | Activity Log Connector | `azurerm_monitor_diagnostic_setting` | Deployed |
 | Analytics Rules (x12) | `azurerm_sentinel_alert_rule_scheduled` | Deployed |
 | Automation Rules (x3) | `azurerm_sentinel_automation_rule` | Deployed |
+
+## What Requires Manual Deployment
+
+| Resource | Template File | Deploy Method |
+|----------|--------------|---------------|
+| IR Playbook (Logic App) | `playbooks/phishing-response/azuredeploy.json` | `az deployment group create` + manual API connection auth |
+| IR Dashboard (Workbook) | `workbooks/ir-dashboard.json` | Manual import via Sentinel Portal > Workbooks > Advanced Editor |
 
 ## License
 
