@@ -255,7 +255,6 @@ sentinel-detection-lab/
 │   │   └── sentinel-validate.yml        # PR validation (SHA-pinned, OIDC)
 │   ├── dependabot.yml                   # Weekly GitHub Actions updates
 │   └── CODEOWNERS                       # @n1ops review required
-├── .gitleaks.toml                       # Custom Azure secret detection rules
 └── .gitleaks.toml                       # Custom Azure secret detection rules
 ```
 
