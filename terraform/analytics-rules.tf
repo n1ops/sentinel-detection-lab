@@ -8,10 +8,9 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["CredentialAccess"]
-      techniques  = ["T1110.001"]
+      techniques  = ["T1110"]
       entity_mappings = {
-        ip      = { type = "IP", field = "IPAddress" }
-        account = { type = "Account", field = "UserPrincipalName" }
+        ip = { type = "IP", field = "Entity_IP" }
       }
     }
     password_spray = {
@@ -22,10 +21,9 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["CredentialAccess"]
-      techniques  = ["T1110.003"]
+      techniques  = ["T1110"]
       entity_mappings = {
-        ip      = { type = "IP", field = "IPAddress" }
-        account = { type = "Account", field = "TargetAccount" }
+        ip = { type = "IP", field = "Entity_IP" }
       }
     }
     impossible_travel = {
@@ -35,11 +33,10 @@ locals {
       severity    = "High"
       frequency   = "PT1H"
       period      = "PT24H"
-      tactics     = ["CredentialAccess"]
+      tactics     = ["InitialAccess"]
       techniques  = ["T1078"]
       entity_mappings = {
-        account = { type = "Account", field = "UserPrincipalName" }
-        ip      = { type = "IP", field = "CurrentIPAddress" }
+        account = { type = "Account", field = "Entity_Account" }
       }
     }
     phishing_inbox_rule = {
@@ -50,9 +47,10 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["InitialAccess"]
-      techniques  = ["T1566.001"]
+      techniques  = ["T1566"]
       entity_mappings = {
-        account = { type = "Account", field = "UserId" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     suspicious_oauth_consent = {
@@ -63,9 +61,10 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["InitialAccess"]
-      techniques  = ["T1566.002"]
+      techniques  = ["T1566"]
       entity_mappings = {
-        account = { type = "Account", field = "InitiatedByUser" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     new_inbox_forwarding_rule = {
@@ -76,9 +75,10 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["Persistence"]
-      techniques  = ["T1137.005"]
+      techniques  = ["T1137"]
       entity_mappings = {
-        account = { type = "Account", field = "UserId" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     suspicious_service_principal = {
@@ -89,9 +89,10 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["Persistence"]
-      techniques  = ["T1136.003"]
+      techniques  = ["T1136"]
       entity_mappings = {
-        account = { type = "Account", field = "InitiatedByUser" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     anomalous_rdp_signin = {
@@ -102,10 +103,10 @@ locals {
       frequency   = "PT1H"
       period      = "PT1H"
       tactics     = ["LateralMovement"]
-      techniques  = ["T1021.001"]
+      techniques  = ["T1021"]
       entity_mappings = {
-        ip      = { type = "IP", field = "IPAddress" }
-        account = { type = "Account", field = "UserPrincipalName" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     multi_host_admin_logon = {
@@ -115,11 +116,10 @@ locals {
       severity    = "High"
       frequency   = "PT1H"
       period      = "PT1H"
-      tactics     = ["LateralMovement"]
-      techniques  = ["T1078.002"]
+      tactics     = ["LateralMovement", "PrivilegeEscalation"]
+      techniques  = ["T1078"]
       entity_mappings = {
-        account = { type = "Account", field = "Account" }
-        host    = { type = "Host", field = "SampleHost" }
+        account = { type = "Account", field = "Entity_Account" }
       }
     }
     bulk_file_download = {
@@ -132,8 +132,7 @@ locals {
       tactics     = ["Exfiltration"]
       techniques  = ["T1567"]
       entity_mappings = {
-        account = { type = "Account", field = "UserId" }
-        ip      = { type = "IP", field = "ClientIP" }
+        account = { type = "Account", field = "Entity_Account" }
       }
     }
     mail_forwarding_to_external = {
@@ -143,10 +142,11 @@ locals {
       severity    = "High"
       frequency   = "PT1H"
       period      = "PT1H"
-      tactics     = ["Exfiltration"]
-      techniques  = ["T1114.003"]
+      tactics     = ["Collection", "Exfiltration"]
+      techniques  = ["T1114"]
       entity_mappings = {
-        account = { type = "Account", field = "UserId" }
+        account = { type = "Account", field = "Entity_Account" }
+        ip      = { type = "IP", field = "Entity_IP" }
       }
     }
     encoded_powershell = {
@@ -159,8 +159,8 @@ locals {
       tactics     = ["DefenseEvasion"]
       techniques  = ["T1027"]
       entity_mappings = {
-        account = { type = "Account", field = "Account" }
-        host    = { type = "Host", field = "Computer" }
+        account = { type = "Account", field = "Entity_Account" }
+        host    = { type = "Host", field = "Entity_Host" }
       }
     }
   }
@@ -184,13 +184,8 @@ resource "azurerm_sentinel_alert_rule_scheduled" "detection" {
   tactics                    = each.value.tactics
   techniques                 = each.value.techniques
 
-  alert_details_override {
-    description_format   = "{{message}}"
-    display_name_format  = "${each.value.name} - {{UserPrincipalName}}"
-  }
-
-  incident_configuration {
-    create_incident = true
+  incident {
+    create_incident_enabled = true
     grouping {
       enabled                 = true
       lookback_duration       = "PT5H"

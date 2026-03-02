@@ -27,12 +27,12 @@ graph TB
     end
 
     subgraph "Data Sources"
-        AAD[Azure AD<br/>Sign-in & Audit Logs]
+        AAD[Azure AD<br/>Sign-in & Audit Logs<br/>Requires P1/P2]
         AZ[Azure Activity<br/>Subscription Logs]
     end
 
     GH -->|terraform apply| RG
-    AAD --> DC
+    AAD -.->|Optional: P1/P2 License| DC
     AZ --> DC
     DC --> LAW
     LAW --> AR
@@ -40,21 +40,53 @@ graph TB
     AR -->|Trigger| LA
 ```
 
+## Deployment Results
+
+This project was deployed and validated against a live Azure subscription. All 19 resources were successfully provisioned:
+
+| Resource | Count | Status |
+|----------|-------|--------|
+| Resource Group (`rg-sentinel-lab`) | 1 | Deployed |
+| Log Analytics Workspace (PerGB2018, 31-day retention) | 1 | Deployed |
+| Sentinel Onboarding | 1 | Deployed |
+| Azure Activity Log Connector | 1 | Deployed |
+| Scheduled Analytics Rules | 12 | Deployed |
+| Automation Rules | 3 | Deployed |
+| **Total** | **19** | **All succeeded** |
+
+### Azure AD Connector (Not Deployed)
+
+The Azure AD sign-in and audit log connector (`azurerm_sentinel_data_connector_azure_active_directory`) requires an **Azure AD P1 or P2 license** and returns `InvalidLicense` (HTTP 401) without one. This connector is commented out in `terraform/data-connectors.tf` and can be enabled by uncommenting the resource block once the appropriate licensing is in place.
+
+The Azure Activity Log connector works without any additional licensing and is deployed by default, providing Administrative, Security, Alert, and Policy log categories.
+
+### Deployment Notes
+
+During deployment, several Sentinel API constraints were discovered and addressed:
+
+- **MITRE technique format**: The Sentinel API only accepts parent technique IDs in `T####` format (e.g., `T1110`), not sub-techniques like `T1110.003`. Sub-technique detail is preserved in the KQL file metadata headers for documentation purposes.
+- **Tactic/technique alignment**: Each technique must be paired with a tactic that MITRE maps it to. For example, `T1078` (Valid Accounts) maps to `InitialAccess`/`Persistence`/`PrivilegeEscalation`/`DefenseEvasion` but not `CredentialAccess` or `LateralMovement`.
+- **Entity mapping columns**: Entity mappings must reference columns that exist in the KQL query output. Each detection exports standardized `Entity_Account`, `Entity_IP`, and/or `Entity_Host` columns for this purpose.
+- **Automation rule names**: Must be valid UUIDs, not human-readable strings.
+- **Automation rule conditions**: The `condition_json` field expects a JSON array (`[{...}]`), not an object with a `clauses` key.
+- **Incident classification**: Must use full enum values like `BenignPositive_SuspiciousButExpected`, not shortened forms.
+- **Resource provider registration**: On fresh subscriptions with `azurerm` ~>4.0, auto-registration can hit 409 conflicts. Setting `resource_provider_registrations = "none"` in the provider block and manually registering only the needed providers (`Microsoft.OperationalInsights`, `Microsoft.SecurityInsights`, `Microsoft.OperationsManagement`, `Microsoft.Insights`) resolves this.
+
 ## MITRE ATT&CK Coverage
 
 | Tactic | Technique | Detection | Severity |
 |--------|-----------|-----------|----------|
-| Credential Access | T1110.001 - Brute Force | Brute Force Sign-in Attempts | Medium |
-| Credential Access | T1110.003 - Password Spraying | Password Spray Attack | High |
-| Credential Access | T1078 - Valid Accounts | Impossible Travel Sign-in | High |
-| Initial Access | T1566.001 - Phishing | Suspicious Inbox Rule Created | High |
-| Initial Access | T1566.002 - Spearphishing Link | Suspicious OAuth Application Consent | Medium |
-| Persistence | T1137.005 - Office Application Startup | New Inbox Forwarding Rule | Medium |
-| Persistence | T1136.003 - Create Cloud Account | Suspicious Service Principal Creation | Medium |
-| Lateral Movement | T1021.001 - Remote Desktop Protocol | Anomalous RDP Sign-in | Medium |
-| Lateral Movement | T1078.002 - Domain Accounts | Multi-Host Admin Logon | High |
+| Credential Access | T1110 - Brute Force | Brute Force Sign-in Attempts | Medium |
+| Credential Access | T1110 - Password Spraying | Password Spray Attack | High |
+| Initial Access | T1078 - Valid Accounts | Impossible Travel Sign-in | High |
+| Initial Access | T1566 - Phishing | Suspicious Inbox Rule Created | High |
+| Initial Access | T1566 - Spearphishing Link | Suspicious OAuth Application Consent | Medium |
+| Persistence | T1137 - Office Application Startup | New Inbox Forwarding Rule | Medium |
+| Persistence | T1136 - Create Cloud Account | Suspicious Service Principal Creation | Medium |
+| Lateral Movement | T1021 - Remote Desktop Protocol | Anomalous RDP Sign-in | Medium |
+| Lateral Movement | T1078 - Valid Accounts | Multi-Host Admin Logon | High |
 | Exfiltration | T1567 - Exfiltration Over Web Service | Bulk File Download | Medium |
-| Exfiltration | T1114.003 - Email Forwarding Rule | Mail Forwarding to External Domain | High |
+| Collection / Exfiltration | T1114 - Email Forwarding Rule | Mail Forwarding to External Domain | High |
 | Defense Evasion | T1027 - Obfuscated Files | Encoded PowerShell Execution | High |
 
 ## Prerequisites
@@ -63,6 +95,8 @@ graph TB
 - [Terraform](https://www.terraform.io/downloads) >= 1.5.0
 - [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) (`az login` authenticated)
 - Python 3.11+ (for KQL validation)
+- **Owner** or **Contributor** role on the Azure subscription
+- Azure AD P1/P2 license (optional, for Azure AD sign-in/audit log connector)
 
 ## Quick Start
 
@@ -72,7 +106,13 @@ git clone https://github.com/n1ops/sentinel-detection-lab.git
 cd sentinel-detection-lab
 
 # Authenticate to Azure
-az login
+az login --tenant <your-tenant>.onmicrosoft.com
+
+# Register required resource providers (first-time only)
+az provider register --namespace Microsoft.OperationalInsights --wait
+az provider register --namespace Microsoft.SecurityInsights --wait
+az provider register --namespace Microsoft.OperationsManagement --wait
+az provider register --namespace Microsoft.Insights --wait
 
 # Deploy infrastructure
 cd terraform
@@ -81,7 +121,29 @@ terraform plan -out=tfplan
 terraform apply tfplan
 
 # Validate detections locally
+cd ..
 python scripts/validate_kql.py
+```
+
+### Enabling the Azure AD Connector
+
+If you have Azure AD P1/P2 licensing, uncomment the Azure AD connector in `terraform/data-connectors.tf`:
+
+```hcl
+resource "azurerm_sentinel_data_connector_azure_active_directory" "aad" {
+  name                       = "aad-connector"
+  log_analytics_workspace_id = azurerm_sentinel_log_analytics_workspace_onboarding.sentinel.workspace_id
+  tenant_id                  = data.azurerm_subscription.current.tenant_id
+}
+```
+
+Then run `terraform apply` to deploy the connector. This enables ingestion of Azure AD sign-in logs and audit logs into the Sentinel workspace.
+
+### Teardown
+
+```bash
+cd terraform
+terraform destroy
 ```
 
 ## Project Structure
@@ -93,7 +155,7 @@ sentinel-detection-lab/
 │   ├── variables.tf              # Input variables
 │   ├── outputs.tf                # Workspace IDs, Sentinel URL
 │   ├── sentinel.tf               # Log Analytics + Sentinel onboarding
-│   ├── data-connectors.tf        # Azure AD + Azure Activity connectors
+│   ├── data-connectors.tf        # Azure Activity connector (AAD optional)
 │   ├── analytics-rules.tf        # 12 KQL detection rules as code
 │   └── automation-rules.tf       # Auto-severity, auto-triage rules
 ├── detections/                   # KQL detection library
@@ -128,7 +190,7 @@ Each detection is a standalone `.kql` file with a standardized metadata header:
 // Trigger: gt 0
 ```
 
-Detections query standard Sentinel tables: `SigninLogs`, `AuditLogs`, `OfficeActivity`, and `SecurityEvent`.
+Detections query standard Sentinel tables: `SigninLogs`, `AuditLogs`, `OfficeActivity`, and `SecurityEvent`. Each query exports standardized entity columns (`Entity_Account`, `Entity_IP`, `Entity_Host`) for Sentinel entity mapping.
 
 ## CI/CD Pipeline
 
@@ -159,6 +221,8 @@ The phishing response playbook (`playbooks/phishing-response/azuredeploy.json`) 
 4. Adds a comment to the Sentinel incident
 5. Tags the incident with MITRE technique identifiers
 
+Deployment requires a managed identity with the **Microsoft Sentinel Responder** role on the workspace.
+
 ## IR Dashboard
 
 The workbook (`workbooks/ir-dashboard.json`) provides 6 visualization tiles:
@@ -172,15 +236,15 @@ The workbook (`workbooks/ir-dashboard.json`) provides 6 visualization tiles:
 
 ## Terraform Resources
 
-| Resource | Type | Purpose |
-|----------|------|---------|
-| Resource Group | `azurerm_resource_group` | Container for all resources |
-| Log Analytics Workspace | `azurerm_log_analytics_workspace` | PerGB2018 SKU, 31-day retention |
-| Sentinel Onboarding | `azurerm_sentinel_log_analytics_workspace_onboarding` | Enables Sentinel on workspace |
-| Azure AD Connector | `azurerm_sentinel_data_connector_azure_active_directory` | Sign-in and audit logs |
-| Activity Log Connector | `azurerm_monitor_diagnostic_setting` | Azure subscription activity |
-| Analytics Rules (x12) | `azurerm_sentinel_alert_rule_scheduled` | KQL detection rules |
-| Automation Rules (x3) | `azurerm_sentinel_automation_rule` | Auto-triage and auto-close |
+| Resource | Type | Status |
+|----------|------|--------|
+| Resource Group | `azurerm_resource_group` | Deployed |
+| Log Analytics Workspace | `azurerm_log_analytics_workspace` | Deployed |
+| Sentinel Onboarding | `azurerm_sentinel_log_analytics_workspace_onboarding` | Deployed |
+| Azure AD Connector | `azurerm_sentinel_data_connector_azure_active_directory` | Requires P1/P2 |
+| Activity Log Connector | `azurerm_monitor_diagnostic_setting` | Deployed |
+| Analytics Rules (x12) | `azurerm_sentinel_alert_rule_scheduled` | Deployed |
+| Automation Rules (x3) | `azurerm_sentinel_automation_rule` | Deployed |
 
 ## License
 
