@@ -12,19 +12,25 @@ MITRE_PATTERN = re.compile(r"T\d{4}(\.\d{3})?")
 DETECTIONS_DIR = Path(__file__).resolve().parent.parent / "detections"
 
 
-def parse_metadata(filepath: Path) -> dict[str, str]:
-    """Extract metadata fields from comment headers in a .kql file."""
+def parse_metadata(filepath: Path) -> dict[str, str] | None:
+    """Extract metadata fields from comment headers in a .kql file.
+
+    Returns None if the file cannot be decoded as UTF-8.
+    """
     metadata = {}
-    with open(filepath, encoding="utf-8") as f:
-        for line_num, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line.startswith("//"):
-                break
-            match = re.match(r"^//\s*(\w[\w\s]*?):\s*(.+)$", line)
-            if match:
-                key = match.group(1).strip()
-                value = match.group(2).strip()
-                metadata[key] = (value, line_num)
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            for line_num, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line.startswith("//"):
+                    break
+                match = re.match(r"^//\s*(\w[\w\s]*?):\s*(.+)$", line)
+                if match:
+                    key = match.group(1).strip()
+                    value = match.group(2).strip()
+                    metadata[key] = (value, line_num)
+    except UnicodeDecodeError as exc:
+        return None
     return metadata
 
 
@@ -34,6 +40,10 @@ def validate_file(filepath: Path) -> list[str]:
     relative = filepath.relative_to(DETECTIONS_DIR.parent)
 
     metadata = parse_metadata(filepath)
+
+    if metadata is None:
+        errors.append(f"{relative}: Unable to decode file as UTF-8")
+        return errors
 
     for field in REQUIRED_FIELDS:
         if field not in metadata:
@@ -56,11 +66,15 @@ def validate_file(filepath: Path) -> list[str]:
             )
 
     # Check that the file has a query body (non-comment, non-empty lines)
-    with open(filepath, encoding="utf-8") as f:
-        has_query = any(
-            line.strip() and not line.strip().startswith("//")
-            for line in f
-        )
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            has_query = any(
+                line.strip() and not line.strip().startswith("//")
+                for line in f
+            )
+    except UnicodeDecodeError:
+        errors.append(f"{relative}: Unable to decode file as UTF-8")
+        return errors
     if not has_query:
         errors.append(f"{relative}: No KQL query body found after metadata headers")
 
@@ -83,6 +97,20 @@ def main() -> int:
 
     all_errors = []
     for filepath in kql_files:
+        relative = filepath.relative_to(DETECTIONS_DIR.parent)
+
+        # Security: skip symlinks to prevent path traversal attacks
+        if filepath.is_symlink():
+            all_errors.append(f"{relative}: Skipped symlink")
+            print(f"  SKIP: {relative} (symlink)")
+            continue
+
+        # Security: enforce 1MB file size limit
+        if filepath.stat().st_size > 1_048_576:
+            all_errors.append(f"{relative}: File exceeds 1MB size limit")
+            print(f"  SKIP: {relative} (exceeds 1MB size limit)")
+            continue
+
         errors = validate_file(filepath)
         if errors:
             all_errors.extend(errors)

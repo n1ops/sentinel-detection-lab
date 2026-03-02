@@ -3,8 +3,9 @@
 *.tfstate.backup
 *.tfstate.lock.info
 .terraform/
-.terraform.lock.hcl
 *.tfplan
+*.tfvars
+*.auto.tfvars
 crash.log
 override.tf
 override.tf.json
@@ -40,3 +41,6 @@ Thumbs.db
 .env
 .env.*
 credentials.json
+
+# Claude
+.claude/

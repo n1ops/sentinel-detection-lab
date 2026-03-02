@@ -399,7 +399,7 @@
     }
   ],
   "fallbackResourceIds": [
-    "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.OperationalInsights/workspaces/{workspace}"
+    "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/YOURRESOURCEGROUP/providers/Microsoft.OperationalInsights/workspaces/YOURWORKSPACE"
   ],
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
   "styleSettings": {

@@ -28,6 +28,8 @@ OfficeActivity
     or MoveToFolder has_any ("RSS Feeds", "RSS Subscriptions", "Deleted Items", "Junk Email", "Archive", "Conversation History")
     // Or mark as read (to hide from user)
     or MarkAsRead =~ "True"
+    // Also flag rules that move to any non-standard folder (catch custom evasion folders)
+    or (strlen(MoveToFolder) > 0 and MoveToFolder !in~ ("Inbox", "Sent Items", "Drafts", "Outbox", "Calendar", "Contacts", "Tasks", "Notes"))
 | extend
     SuspiciousIndicators = bag_pack(
         "DeletesMessages", DeleteMessage =~ "True",

@@ -1,7 +1,6 @@
 variable "location" {
   description = "Azure region for all resources"
   type        = string
-  default     = "eastus"
 
   validation {
     condition     = can(regex("^[a-z]+[a-z0-9]*$", var.location))
@@ -12,7 +11,6 @@ variable "location" {
 variable "resource_prefix" {
   description = "Prefix for all resource names"
   type        = string
-  default     = "rg"
 
   validation {
     condition     = length(var.resource_prefix) >= 2 && length(var.resource_prefix) <= 10 && can(regex("^[a-z][a-z0-9-]*$", var.resource_prefix))
@@ -23,7 +21,6 @@ variable "resource_prefix" {
 variable "log_retention_days" {
   description = "Log Analytics workspace retention in days (31 = free tier)"
   type        = number
-  default     = 31
 
   validation {
     condition     = var.log_retention_days >= 31 && var.log_retention_days <= 730

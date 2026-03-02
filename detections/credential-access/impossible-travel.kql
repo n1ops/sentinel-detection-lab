@@ -1,5 +1,5 @@
 // Name: Impossible Travel - Anomalous Sign-In Locations
-// MITRE: T1078 - Credential Access / Valid Accounts
+// MITRE: T1078 - Valid Accounts (Credential Access / Lateral Movement)
 // Severity: High
 // Description: Detects a user signing in from two geographically distant locations within a short time window, indicating potential credential compromise or token theft.
 // Query Frequency: 1h
@@ -48,7 +48,10 @@ SigninLogs
 | where ApproxDistanceKm > 500  // More than 500 km apart
 | extend
     RequiredSpeedKmh = iff(TimeDiffMinutes > 0, round(ApproxDistanceKm / (toreal(TimeDiffMinutes) / 60.0), 0), real(999999)),
-    Entity_Account = UserPrincipalName
+    Entity_Account = UserPrincipalName,
+    ConditionalAccessStatus = ConditionalAccessStatus,
+    RiskLevelDuringSignIn = RiskLevelDuringSignIn,
+    RiskState = RiskState
 | where RequiredSpeedKmh > 900  // Faster than commercial flight
 | project
     TimeGenerated,
@@ -63,5 +66,8 @@ SigninLogs
     ApproxDistanceKm,
     RequiredSpeedKmh,
     AppDisplayName,
+    ConditionalAccessStatus,
+    RiskLevelDuringSignIn,
+    RiskState,
     Entity_Account
 | order by RequiredSpeedKmh desc

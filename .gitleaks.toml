@@ -7,5 +7,22 @@ useDefault = true
 description = "Allowlist for non-secret patterns"
 paths = [
     '''\.terraform\.lock\.hcl$''',
-    '''\.tfstate$''',
 ]
+
+[[rules]]
+id = "azure-storage-connection-string"
+description = "Azure Storage Account Connection String"
+regex = '''DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{86,88};'''
+tags = ["azure", "storage", "connection-string"]
+
+[[rules]]
+id = "azure-service-principal-secret"
+description = "Azure Service Principal Client Secret"
+regex = '''(?i)(client[_-]?secret|AZURE[_-]?CLIENT[_-]?SECRET)\s*[=:]\s*['"][A-Za-z0-9~._-]{34,40}['"]'''
+tags = ["azure", "service-principal"]
+
+[[rules]]
+id = "azure-sas-token"
+description = "Azure SAS Token"
+regex = '''[?&]sig=[A-Za-z0-9%+/=]{43,86}'''
+tags = ["azure", "sas-token"]

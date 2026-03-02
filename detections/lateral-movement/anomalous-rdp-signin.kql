@@ -57,6 +57,8 @@ SigninLogs
     AnomalyScore,
     AppDisplayName,
     ConditionalAccessStatus,
+    RiskLevelDuringSignIn,
+    RiskState,
     Entity_Account,
     Entity_IP,
     Entity_Host

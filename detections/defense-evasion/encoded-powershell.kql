@@ -9,11 +9,16 @@
 let timeframe = 1h;
 // Match common Base64 patterns (minimum 40 chars of Base64 to reduce false positives)
 let base64_pattern = "[A-Za-z0-9+/]{40,}[=]{0,2}";
+// Caret insertion / char-stuffing bypass: matches p^o^w^e^r^s^h^e^l^l and similar
+let powershell_obfuscated_pattern = @"(?i)p.?o.?w.?e.?r.?s.?h.?e.?l.?l";
 SecurityEvent
 | where TimeGenerated >= ago(timeframe)
 | where EventID == 4688  // Process creation
 | where Process has_any ("powershell.exe", "pwsh.exe", "powershell_ise.exe")
     or NewProcessName has_any ("powershell.exe", "pwsh.exe", "powershell_ise.exe")
+    // Catch parent processes spawning PowerShell (common evasion chain)
+    or (ParentProcessName has_any ("cmd.exe", "wscript.exe", "mshta.exe", "cscript.exe")
+        and (NewProcessName has_any ("powershell.exe", "pwsh.exe") or CommandLine matches regex powershell_obfuscated_pattern))
 | extend CommandLine = iff(isnotempty(CommandLine), CommandLine, "")
 | where
     // Detect encoded command flags (case-insensitive matching via has)
@@ -29,6 +34,13 @@ SecurityEvent
     or CommandLine has "[Convert]::FromBase64"
     // Detect common download cradles with encoding
     or (CommandLine has "Invoke-Expression" and CommandLine has "DownloadString")
+    // Detect caret insertion / obfuscated PowerShell invocation
+    or CommandLine matches regex powershell_obfuscated_pattern
+    // Detect -windowstyle hidden (commonly paired with encoded commands)
+    or CommandLine matches regex @"(?i)\-[wW](indowstyle)?\s+[hH]idden"
+    // Detect Invoke-Expression / IEX with various obfuscation patterns
+    or CommandLine matches regex @"(?i)(I\s*E\s*X|Invoke[\-\s]*Expression)"
+    or CommandLine matches regex @"(?i)(\"|')I(EX|nvoke-Expression)(\"|')"
 | extend
     // Try to extract the encoded payload
     EncodedPayload = extract(@"(?i)(?:\-[eE](?:[nN][cC]?|ncoded[cC]ommand))\s+([A-Za-z0-9+/=]+)", 1, CommandLine),
@@ -40,11 +52,15 @@ SecurityEvent
     DecodedCommand = iff(isnotempty(EncodedPayload), base64_decode_tostring(EncodedPayload), ""),
     CommandLineLength = strlen(CommandLine),
     HasDownloadCradle = CommandLine has_any ("DownloadString", "DownloadFile", "Invoke-WebRequest", "wget", "curl", "Net.WebClient"),
-    HasInvokeExpression = CommandLine has_any ("Invoke-Expression", "IEX", ".Invoke(")
+    HasInvokeExpression = CommandLine has_any ("Invoke-Expression", "IEX", ".Invoke("),
+    HasHiddenWindow = CommandLine matches regex @"(?i)\-[wW](indowstyle)?\s+[hH]idden",
+    SuspiciousParentProcess = ParentProcessName has_any ("cmd.exe", "wscript.exe", "mshta.exe", "cscript.exe")
 | extend
     RiskIndicators = bag_pack(
         "HasDownloadCradle", HasDownloadCradle,
         "HasInvokeExpression", HasInvokeExpression,
+        "HasHiddenWindow", HasHiddenWindow,
+        "SuspiciousParentProcess", SuspiciousParentProcess,
         "CommandLineLength", CommandLineLength,
         "HasDecodablePayload", isnotempty(DecodedCommand)
     )

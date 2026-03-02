@@ -12,13 +12,21 @@ permissions:
   security-events: write
   id-token: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   security:
-    uses: n1ops/devsecops-pipeline-reference/.github/workflows/reusable-pipeline.yml@main
+    uses: n1ops/devsecops-pipeline-reference/.github/workflows/reusable-pipeline.yml@07455152b14f2f6964b24a681fb1fb56833ceea8 # main
+    timeout-minutes: 15
     with:
       language: python
       runtime-version: "3.11"
       install-command: "pip install -r requirements-dev.txt"
       test-command: "python scripts/validate_kql.py"
       terraform-directory: "terraform/"
-    secrets: inherit
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

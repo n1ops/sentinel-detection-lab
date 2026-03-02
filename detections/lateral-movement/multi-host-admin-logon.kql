@@ -12,7 +12,7 @@ SecurityEvent
 | where TimeGenerated >= ago(timeframe)
 | where EventID == 4672  // Special privileges assigned to new logon
 | where Account !endswith "$"  // Exclude machine accounts
-| where Account !in ("NT AUTHORITY\\SYSTEM", "NT AUTHORITY\\LOCAL SERVICE", "NT AUTHORITY\\NETWORK SERVICE")
+| where Account !in~ ("NT AUTHORITY\\SYSTEM", "NT AUTHORITY\\LOCAL SERVICE", "NT AUTHORITY\\NETWORK SERVICE")
 | extend
     AccountDomain = extract("^(.+)\\\\", 1, Account),
     AccountName = extract("\\\\(.+)$", 1, Account)
@@ -33,7 +33,8 @@ SecurityEvent
         round(toreal(DistinctHosts) / toreal(datetime_diff('minute', LastLogon, FirstLogon)), 2),
         toreal(DistinctHosts)
     ),
-    Entity_Account = Account
+    Entity_Account = Account,
+    Entity_IP = IpAddress
 | project
     FirstLogon,
     LastLogon,
@@ -46,5 +47,6 @@ SecurityEvent
     SweepDurationMinutes,
     HostsPerMinute,
     LogonTypes,
-    Entity_Account
+    Entity_Account,
+    Entity_IP
 | order by DistinctHosts desc

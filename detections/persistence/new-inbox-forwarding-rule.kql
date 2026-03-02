@@ -7,8 +7,10 @@
 // Trigger: gt 0
 
 let timeframe = 1h;
-// Define your organization's accepted domains
-let internal_domains = dynamic(["yourdomain.com", "yourdomain.onmicrosoft.com"]);
+// Option 1: Use a Sentinel Watchlist for internal domains (recommended)
+// let internal_domains = (_GetWatchlist('InternalDomains') | project Domain);
+// Option 2: Replace with your actual domains
+let internal_domains = dynamic(["yourdomain.com", "yourdomain.onmicrosoft.com"]); // TODO: Replace with actual tenant domains or use Watchlist above
 OfficeActivity
 | where TimeGenerated >= ago(timeframe)
 | where Operation in ("Set-Mailbox", "New-InboxRule", "Set-InboxRule", "Enable-InboxRule")

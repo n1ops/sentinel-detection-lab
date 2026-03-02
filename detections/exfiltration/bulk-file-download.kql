@@ -11,7 +11,7 @@ let download_threshold = 50;
 OfficeActivity
 | where TimeGenerated >= ago(timeframe)
 | where Operation in ("FileDownloaded", "FileSyncDownloadedFull")
-| where RecordType in ("SharePointFileOperation", "OneDriveForBusinessFileOperation", "6")  // SharePoint and OneDrive record types
+| where RecordType in ("SharePointFileOperation", "OneDriveForBusinessFileOperation") or RecordType == 6  // SharePoint and OneDrive record types
 | extend
     FileName = OfficeObjectId,
     FileExtension = extract("\\.([^.]+)$", 1, OfficeObjectId),

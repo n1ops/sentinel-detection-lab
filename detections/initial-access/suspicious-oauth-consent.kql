@@ -27,7 +27,13 @@ AuditLogs
     TargetApp = tostring(TargetResources[0].displayName),
     TargetAppId = tostring(TargetResources[0].id)
 | extend
-    ConsentedPermissions = tostring(parse_json(tostring(TargetResources[0].modifiedProperties))[4].newValue)
+    ModifiedProps = parse_json(tostring(TargetResources[0].modifiedProperties)),
+    ConsentedPermissions = tostring(
+        mv_apply prop = ModifiedProps on (
+            where prop.displayName =~ "ConsentAction.Permissions"
+            | project prop.newValue
+        )
+    )
 | extend
     PermissionList = extract_all("Scope:\\s*([^]]+)", ConsentedPermissions)
 | mv-expand PermissionList to typeof(string)

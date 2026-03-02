@@ -7,6 +7,8 @@
 // Trigger: gt 0
 
 let timeframe = 1h;
+// TODO: Populate with known/approved service principal display names for your environment
+let allowed_service_principals = dynamic(["Microsoft Graph", "Azure Portal", "Azure CLI"]);
 AuditLogs
 | where TimeGenerated >= ago(timeframe)
 | where OperationName in (
@@ -21,6 +23,9 @@ AuditLogs
     InitiatedBy_App = tostring(InitiatedBy.app.displayName),
     InitiatedBy_IP = tostring(InitiatedBy.user.ipAddress),
     TargetResourceName = tostring(TargetResources[0].displayName),
+    AppDisplayName = tostring(TargetResources[0].displayName)
+| where AppDisplayName !in~ (allowed_service_principals)
+| extend
     TargetResourceId = tostring(TargetResources[0].id),
     TargetResourceType = tostring(TargetResources[0].type)
 | extend

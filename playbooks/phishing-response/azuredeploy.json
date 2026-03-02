@@ -18,6 +18,7 @@
         "PlaybookName": {
             "type": "string",
             "defaultValue": "Phishing-Response-Playbook",
+            "minLength": 3,
             "metadata": {
                 "description": "Name of the Logic App playbook resource."
             }
@@ -31,18 +32,21 @@
         },
         "SentinelWorkspaceId": {
             "type": "string",
+            "minLength": 1,
             "metadata": {
                 "description": "Full resource ID of the Log Analytics workspace used by Microsoft Sentinel (e.g., /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name})."
             }
         },
         "TeamsChannelId": {
             "type": "string",
+            "minLength": 1,
             "metadata": {
                 "description": "The ID of the Microsoft Teams channel where incident notifications will be posted."
             }
         },
         "TeamsGroupId": {
             "type": "string",
+            "minLength": 1,
             "metadata": {
                 "description": "The ID of the Microsoft Teams group (team) that contains the target channel."
             }
@@ -112,6 +116,14 @@
                         "SentinelWorkspaceId": {
                             "defaultValue": "",
                             "type": "String"
+                        },
+                        "TeamsGroupId": {
+                            "defaultValue": "",
+                            "type": "String"
+                        },
+                        "TeamsChannelId": {
+                            "defaultValue": "",
+                            "type": "String"
                         }
                     },
                     "triggers": {
@@ -128,7 +140,20 @@
                                 },
                                 "path": "/incident-creation"
                             },
-                            "conditions": []
+                            "conditions": [
+                                {
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "greater": [
+                                                    "@triggerBody()?['object']?['properties']?['severity']",
+                                                    "Informational"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
                         }
                     },
                     "actions": {
@@ -184,216 +209,276 @@
                             },
                             "runAfter": {}
                         },
-                        "Entities_-_Get_IPs": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        "Main_Processing_Scope": {
+                            "type": "Scope",
+                            "actions": {
+                                "Entities_-_Get_IPs": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                        "path": "/entities/ip"
+                                    },
+                                    "runAfter": {}
+                                },
+                                "Entities_-_Get_Accounts": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                        "path": "/entities/account"
+                                    },
+                                    "runAfter": {}
+                                },
+                                "Entities_-_Get_URLs": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                        "path": "/entities/url"
+                                    },
+                                    "runAfter": {}
+                                },
+                                "For_each_-_Get_IP_Entities": {
+                                    "type": "Foreach",
+                                    "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
+                                    "actions": {
+                                        "Append_IP_to_array": {
+                                            "type": "AppendToArrayVariable",
+                                            "inputs": {
+                                                "name": "IPAddresses",
+                                                "value": "@items('For_each_-_Get_IP_Entities')?['Address']"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Entities_-_Get_IPs": [
+                                            "Succeeded"
+                                        ]
                                     }
                                 },
-                                "method": "post",
-                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
-                                "path": "/entities/ip"
+                                "For_each_-_Get_Account_Entities": {
+                                    "type": "Foreach",
+                                    "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",
+                                    "actions": {
+                                        "Append_Account_to_array": {
+                                            "type": "AppendToArrayVariable",
+                                            "inputs": {
+                                                "name": "AccountEntities",
+                                                "value": "@concat(items('For_each_-_Get_Account_Entities')?['Name'], ' (', coalesce(items('For_each_-_Get_Account_Entities')?['UPNSuffix'], 'N/A'), ')')"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Entities_-_Get_Accounts": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "For_each_-_Get_URL_Entities": {
+                                    "type": "Foreach",
+                                    "foreach": "@body('Entities_-_Get_URLs')?['URLs']",
+                                    "actions": {
+                                        "Append_URL_to_array": {
+                                            "type": "AppendToArrayVariable",
+                                            "inputs": {
+                                                "name": "URLEntities",
+                                                "value": "@items('For_each_-_Get_URL_Entities')?['Url']"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Entities_-_Get_URLs": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Compose_-_Build_Entity_Summary": {
+                                    "type": "Compose",
+                                    "inputs": "@concat(\n  '<h3>Phishing Incident Entity Enrichment</h3>',\n  '<p><strong>Incident Title:</strong> ', replace(replace(triggerBody()?['object']?['properties']?['title'], '<', '&lt;'), '>', '&gt;'), '</p>',\n  '<p><strong>Incident ID:</strong> ', triggerBody()?['object']?['properties']?['incidentNumber'], '</p>',\n  '<p><strong>Severity:</strong> ', replace(replace(triggerBody()?['object']?['properties']?['severity'], '<', '&lt;'), '>', '&gt;'), '</p>',\n  '<p><strong>Status:</strong> ', replace(replace(triggerBody()?['object']?['properties']?['status'], '<', '&lt;'), '>', '&gt;'), '</p>',\n  '<p><strong>Created Time:</strong> ', triggerBody()?['object']?['properties']?['createdTimeUtc'], '</p>',\n  '<hr/>',\n  '<h4>Extracted Entities</h4>',\n  '<p><strong>IP Addresses:</strong> ', if(equals(length(variables('IPAddresses')), 0), 'None found', replace(replace(join(variables('IPAddresses'), ', '), '<', '&lt;'), '>', '&gt;')), '</p>',\n  '<p><strong>Accounts:</strong> ', if(equals(length(variables('AccountEntities')), 0), 'None found', replace(replace(join(variables('AccountEntities'), ', '), '<', '&lt;'), '>', '&gt;')), '</p>',\n  '<p><strong>URLs:</strong> ', if(equals(length(variables('URLEntities')), 0), 'None found', replace(replace(join(variables('URLEntities'), ', '), '<', '&lt;'), '>', '&gt;')), '</p>',\n  '<hr/>',\n  '<p><strong>MITRE ATT&amp;CK Technique:</strong> T1566 - Phishing</p>',\n  '<p><strong>Incident Link:</strong> <a href=\"', replace(replace(triggerBody()?['object']?['properties']?['incidentUrl'], '<', '&lt;'), '>', '&gt;'), '\">View in Sentinel</a></p>'\n)",
+                                    "runAfter": {
+                                        "For_each_-_Get_IP_Entities": [
+                                            "Succeeded"
+                                        ],
+                                        "For_each_-_Get_Account_Entities": [
+                                            "Succeeded"
+                                        ],
+                                        "For_each_-_Get_URL_Entities": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Set_-_Entity_Summary_Variable": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "EntitySummary",
+                                        "value": "@{outputs('Compose_-_Build_Entity_Summary')}"
+                                    },
+                                    "runAfter": {
+                                        "Compose_-_Build_Entity_Summary": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Post_message_to_Teams": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['teams']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": {
+                                            "recipient": {
+                                                "groupId": "@parameters('TeamsGroupId')",
+                                                "channelId": "@parameters('TeamsChannelId')"
+                                            },
+                                            "messageBody": "<div style=\"border-left: 4px solid #d13438; padding: 10px; margin: 10px 0;\">\n<h2 style=\"color: #d13438;\">Phishing Incident Detected</h2>\n<table style=\"border-collapse: collapse; width: 100%;\">\n<tr><td style=\"padding: 6px; font-weight: bold; width: 160px;\">Incident Title</td><td style=\"padding: 6px;\">@{replace(replace(triggerBody()?['object']?['properties']?['title'], '<', '&lt;'), '>', '&gt;')}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Incident Number</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['incidentNumber']}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">Severity</td><td style=\"padding: 6px;\">@{replace(replace(triggerBody()?['object']?['properties']?['severity'], '<', '&lt;'), '>', '&gt;')}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Status</td><td style=\"padding: 6px;\">@{replace(replace(triggerBody()?['object']?['properties']?['status'], '<', '&lt;'), '>', '&gt;')}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">Created (UTC)</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['createdTimeUtc']}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Alert Product</td><td style=\"padding: 6px;\">@{replace(replace(string(triggerBody()?['object']?['properties']?['additionalData']?['alertProductNames']), '<', '&lt;'), '>', '&gt;')}</td></tr>\n</table>\n<h3>Extracted Entities</h3>\n<table style=\"border-collapse: collapse; width: 100%;\">\n<tr><td style=\"padding: 6px; font-weight: bold; width: 160px;\">IP Addresses</td><td style=\"padding: 6px;\">@{if(equals(length(variables('IPAddresses')), 0), 'None found', replace(replace(join(variables('IPAddresses'), ', '), '<', '&lt;'), '>', '&gt;'))}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Accounts</td><td style=\"padding: 6px;\">@{if(equals(length(variables('AccountEntities')), 0), 'None found', replace(replace(join(variables('AccountEntities'), ', '), '<', '&lt;'), '>', '&gt;'))}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">URLs</td><td style=\"padding: 6px;\">@{if(equals(length(variables('URLEntities')), 0), 'None found', replace(replace(join(variables('URLEntities'), ', '), '<', '&lt;'), '>', '&gt;'))}</td></tr>\n</table>\n<p><strong>MITRE ATT&amp;CK:</strong> T1566 - Phishing</p>\n<p><a href=\"@{replace(replace(triggerBody()?['object']?['properties']?['incidentUrl'], '<', '&lt;'), '>', '&gt;')}\">View Incident in Microsoft Sentinel</a></p>\n</div>"
+                                        },
+                                        "path": "/beta/teams/@{encodeURIComponent(parameters('TeamsGroupId'))}/channels/@{encodeURIComponent(parameters('TeamsChannelId'))}/messages"
+                                    },
+                                    "runAfter": {
+                                        "Set_-_Entity_Summary_Variable": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Add_comment_to_incident": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": {
+                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                            "message": "<p><strong>[Automated Phishing Response Playbook]</strong></p>\n<p>Entity extraction completed at @{utcNow()}.</p>\n@{variables('EntitySummary')}\n<p><em>This comment was generated automatically by the Phishing-Response-Playbook Logic App.</em></p>"
+                                        },
+                                        "path": "/Incidents/Comment"
+                                    },
+                                    "runAfter": {
+                                        "Post_message_to_Teams": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Update_incident_-_Add_MITRE_Tag": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "put",
+                                        "body": {
+                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                            "tagsToAdd": {
+                                                "TagsToAdd": [
+                                                    {
+                                                        "Tag": "T1566-Phishing"
+                                                    },
+                                                    {
+                                                        "Tag": "Playbook-Executed"
+                                                    },
+                                                    {
+                                                        "Tag": "Initial-Access"
+                                                    }
+                                                ]
+                                            }
+                                        },
+                                        "path": "/Incidents"
+                                    },
+                                    "runAfter": {
+                                        "Add_comment_to_incident": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                }
                             },
                             "runAfter": {
+                                "Initialize_-_Entity_Summary": [
+                                    "Succeeded"
+                                ],
                                 "Initialize_-_IP_Addresses": [
                                     "Succeeded"
-                                ]
-                            }
-                        },
-                        "Entities_-_Get_Accounts": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "method": "post",
-                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
-                                "path": "/entities/account"
-                            },
-                            "runAfter": {
+                                ],
                                 "Initialize_-_Account_Entities": [
                                     "Succeeded"
-                                ]
-                            }
-                        },
-                        "Entities_-_Get_URLs": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "method": "post",
-                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
-                                "path": "/entities/url"
-                            },
-                            "runAfter": {
+                                ],
                                 "Initialize_-_URL_Entities": [
                                     "Succeeded"
                                 ]
                             }
                         },
-                        "For_each_-_Get_IP_Entities": {
-                            "type": "Foreach",
-                            "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
+                        "Error_Handling_Scope": {
+                            "type": "Scope",
                             "actions": {
-                                "Append_IP_to_array": {
-                                    "type": "AppendToArrayVariable",
+                                "Post_error_notification_to_Teams": {
+                                    "type": "ApiConnection",
                                     "inputs": {
-                                        "name": "IPAddresses",
-                                        "value": "@items('For_each_-_Get_IP_Entities')?['Address']"
-                                    }
-                                }
-                            },
-                            "runAfter": {
-                                "Entities_-_Get_IPs": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "For_each_-_Get_Account_Entities": {
-                            "type": "Foreach",
-                            "foreach": "@body('Entities_-_Get_Accounts')?['Accounts']",
-                            "actions": {
-                                "Append_Account_to_array": {
-                                    "type": "AppendToArrayVariable",
-                                    "inputs": {
-                                        "name": "AccountEntities",
-                                        "value": "@concat(items('For_each_-_Get_Account_Entities')?['Name'], ' (', coalesce(items('For_each_-_Get_Account_Entities')?['UPNSuffix'], 'N/A'), ')')"
-                                    }
-                                }
-                            },
-                            "runAfter": {
-                                "Entities_-_Get_Accounts": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "For_each_-_Get_URL_Entities": {
-                            "type": "Foreach",
-                            "foreach": "@body('Entities_-_Get_URLs')?['URLs']",
-                            "actions": {
-                                "Append_URL_to_array": {
-                                    "type": "AppendToArrayVariable",
-                                    "inputs": {
-                                        "name": "URLEntities",
-                                        "value": "@items('For_each_-_Get_URL_Entities')?['Url']"
-                                    }
-                                }
-                            },
-                            "runAfter": {
-                                "Entities_-_Get_URLs": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Compose_-_Build_Entity_Summary": {
-                            "type": "Compose",
-                            "inputs": "@concat(\n  '<h3>Phishing Incident Entity Enrichment</h3>',\n  '<p><strong>Incident Title:</strong> ', triggerBody()?['object']?['properties']?['title'], '</p>',\n  '<p><strong>Incident ID:</strong> ', triggerBody()?['object']?['properties']?['incidentNumber'], '</p>',\n  '<p><strong>Severity:</strong> ', triggerBody()?['object']?['properties']?['severity'], '</p>',\n  '<p><strong>Status:</strong> ', triggerBody()?['object']?['properties']?['status'], '</p>',\n  '<p><strong>Created Time:</strong> ', triggerBody()?['object']?['properties']?['createdTimeUtc'], '</p>',\n  '<hr/>',\n  '<h4>Extracted Entities</h4>',\n  '<p><strong>IP Addresses:</strong> ', if(equals(length(variables('IPAddresses')), 0), 'None found', join(variables('IPAddresses'), ', ')), '</p>',\n  '<p><strong>Accounts:</strong> ', if(equals(length(variables('AccountEntities')), 0), 'None found', join(variables('AccountEntities'), ', ')), '</p>',\n  '<p><strong>URLs:</strong> ', if(equals(length(variables('URLEntities')), 0), 'None found', join(variables('URLEntities'), ', ')), '</p>',\n  '<hr/>',\n  '<p><strong>MITRE ATT&amp;CK Technique:</strong> T1566 - Phishing</p>',\n  '<p><strong>Incident Link:</strong> <a href=\"', triggerBody()?['object']?['properties']?['incidentUrl'], '\">View in Sentinel</a></p>'\n)",
-                            "runAfter": {
-                                "For_each_-_Get_IP_Entities": [
-                                    "Succeeded"
-                                ],
-                                "For_each_-_Get_Account_Entities": [
-                                    "Succeeded"
-                                ],
-                                "For_each_-_Get_URL_Entities": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Set_-_Entity_Summary_Variable": {
-                            "type": "SetVariable",
-                            "inputs": {
-                                "name": "EntitySummary",
-                                "value": "@{outputs('Compose_-_Build_Entity_Summary')}"
-                            },
-                            "runAfter": {
-                                "Compose_-_Build_Entity_Summary": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Post_message_to_Teams": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['teams']['connectionId']"
-                                    }
-                                },
-                                "method": "post",
-                                "body": {
-                                    "recipient": {
-                                        "groupId": "",
-                                        "channelId": ""
-                                    },
-                                    "messageBody": "<div style=\"border-left: 4px solid #d13438; padding: 10px; margin: 10px 0;\">\n<h2 style=\"color: #d13438;\">Phishing Incident Detected</h2>\n<table style=\"border-collapse: collapse; width: 100%;\">\n<tr><td style=\"padding: 6px; font-weight: bold; width: 160px;\">Incident Title</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['title']}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Incident Number</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['incidentNumber']}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">Severity</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['severity']}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Status</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['status']}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">Created (UTC)</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['createdTimeUtc']}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Alert Product</td><td style=\"padding: 6px;\">@{triggerBody()?['object']?['properties']?['additionalData']?['alertProductNames']}</td></tr>\n</table>\n<h3>Extracted Entities</h3>\n<table style=\"border-collapse: collapse; width: 100%;\">\n<tr><td style=\"padding: 6px; font-weight: bold; width: 160px;\">IP Addresses</td><td style=\"padding: 6px;\">@{if(equals(length(variables('IPAddresses')), 0), 'None found', join(variables('IPAddresses'), ', '))}</td></tr>\n<tr style=\"background-color: #f5f5f5;\"><td style=\"padding: 6px; font-weight: bold;\">Accounts</td><td style=\"padding: 6px;\">@{if(equals(length(variables('AccountEntities')), 0), 'None found', join(variables('AccountEntities'), ', '))}</td></tr>\n<tr><td style=\"padding: 6px; font-weight: bold;\">URLs</td><td style=\"padding: 6px;\">@{if(equals(length(variables('URLEntities')), 0), 'None found', join(variables('URLEntities'), ', '))}</td></tr>\n</table>\n<p><strong>MITRE ATT&amp;CK:</strong> T1566 - Phishing</p>\n<p><a href=\"@{triggerBody()?['object']?['properties']?['incidentUrl']}\">View Incident in Microsoft Sentinel</a></p>\n</div>"
-                                },
-                                "path": "/beta/teams/@{encodeURIComponent('')}/channels/@{encodeURIComponent('')}/messages"
-                            },
-                            "runAfter": {
-                                "Set_-_Entity_Summary_Variable": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Add_comment_to_incident": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "method": "post",
-                                "body": {
-                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                    "message": "<p><strong>[Automated Phishing Response Playbook]</strong></p>\n<p>Entity extraction completed at @{utcNow()}.</p>\n@{variables('EntitySummary')}\n<p><em>This comment was generated automatically by the Phishing-Response-Playbook Logic App.</em></p>"
-                                },
-                                "path": "/Incidents/Comment"
-                            },
-                            "runAfter": {
-                                "Post_message_to_Teams": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Update_incident_-_Add_MITRE_Tag": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "method": "put",
-                                "body": {
-                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                    "tagsToAdd": {
-                                        "TagsToAdd": [
-                                            {
-                                                "Tag": "T1566-Phishing"
-                                            },
-                                            {
-                                                "Tag": "Playbook-Executed"
-                                            },
-                                            {
-                                                "Tag": "Initial-Access"
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['teams']['connectionId']"
                                             }
+                                        },
+                                        "method": "post",
+                                        "body": {
+                                            "recipient": {
+                                                "groupId": "@parameters('TeamsGroupId')",
+                                                "channelId": "@parameters('TeamsChannelId')"
+                                            },
+                                            "messageBody": "<div style=\"border-left: 4px solid #ffa500; padding: 10px; margin: 10px 0;\"><h3 style=\"color: #ffa500;\">Playbook Error: Phishing Response</h3><p>The Phishing-Response-Playbook encountered an error while processing incident <strong>@{triggerBody()?['object']?['properties']?['incidentNumber']}</strong>.</p><p><strong>Incident Title:</strong> @{replace(replace(triggerBody()?['object']?['properties']?['title'], '<', '&lt;'), '>', '&gt;')}</p><p><strong>Error Time (UTC):</strong> @{utcNow()}</p><p>Please investigate manually. <a href=\"@{triggerBody()?['object']?['properties']?['incidentUrl']}\">View Incident in Sentinel</a></p></div>"
+                                        },
+                                        "path": "/beta/teams/@{encodeURIComponent(parameters('TeamsGroupId'))}/channels/@{encodeURIComponent(parameters('TeamsChannelId'))}/messages"
+                                    },
+                                    "runAfter": {}
+                                },
+                                "Add_error_comment_to_incident": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "body": {
+                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                            "message": "<p><strong>[Playbook Error]</strong></p>\n<p>The Phishing-Response-Playbook failed at @{utcNow()}. Manual investigation required.</p>\n<p><em>Review the Logic App run history for error details.</em></p>"
+                                        },
+                                        "path": "/Incidents/Comment"
+                                    },
+                                    "runAfter": {
+                                        "Post_error_notification_to_Teams": [
+                                            "Succeeded",
+                                            "Failed"
                                         ]
                                     }
-                                },
-                                "path": "/Incidents"
+                                }
                             },
                             "runAfter": {
-                                "Add_comment_to_incident": [
-                                    "Succeeded"
+                                "Main_Processing_Scope": [
+                                    "Failed",
+                                    "TimedOut"
                                 ]
                             }
                         }
@@ -422,6 +507,12 @@
                     },
                     "SentinelWorkspaceId": {
                         "value": "[parameters('SentinelWorkspaceId')]"
+                    },
+                    "TeamsGroupId": {
+                        "value": "[parameters('TeamsGroupId')]"
+                    },
+                    "TeamsChannelId": {
+                        "value": "[parameters('TeamsChannelId')]"
                     }
                 }
             }

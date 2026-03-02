@@ -1,12 +1,12 @@
 // Name: Brute Force Sign-In Attempts
 // MITRE: T1110.001 - Credential Access / Brute Force
 // Severity: Medium
-// Description: Detects multiple failed sign-in attempts (>10) from a single IP address within 1 hour against Azure AD, indicating a potential brute force attack.
+// Description: Detects multiple failed sign-in attempts (>25) from a single IP address within 1 hour against Azure AD, indicating a potential brute force attack. Includes success-after-failure correlation to detect compromise.
 // Query Frequency: 1h
-// Query Period: 1h
+// Query Period: 2h
 // Trigger: gt 0
 
-let failure_threshold = 10;
+let failure_threshold = 25;
 let timeframe = 1h;
 SigninLogs
 | where TimeGenerated >= ago(timeframe)
@@ -19,12 +19,30 @@ SigninLogs
     FirstAttempt = min(TimeGenerated),
     LastAttempt = max(TimeGenerated),
     ResultTypes = make_set(ResultType, 10),
-    UserAgents = make_set(UserAgent, 5)
+    UserAgents = make_set(UserAgent, 5),
+    ConditionalAccessStatuses = make_set(ConditionalAccessStatus, 5)
     by IPAddress, Location
 | where FailedAttempts > failure_threshold
 | extend
     AttackDurationMinutes = datetime_diff('minute', LastAttempt, FirstAttempt),
     Entity_IP = IPAddress
+// Join to find successful logins from the same IP within 1 hour after brute force
+| join kind=leftouter (
+    SigninLogs
+    | where TimeGenerated > ago(timeframe + 1h)
+    | where ResultType == "0"
+    | project SuccessTime = TimeGenerated, SuccessAccount = UserPrincipalName, IPAddress, RiskLevelDuringSignIn, RiskState
+) on IPAddress
+| where isempty(SuccessTime) or SuccessTime between (FirstAttempt .. (LastAttempt + 1h))
+| summarize
+    SuccessfulAccounts = make_set_if(SuccessAccount, isnotempty(SuccessTime), 25),
+    SuccessCount = dcountif(SuccessAccount, isnotempty(SuccessTime)),
+    RiskLevels = make_set_if(RiskLevelDuringSignIn, isnotempty(RiskLevelDuringSignIn), 5),
+    RiskStates = make_set_if(RiskState, isnotempty(RiskState), 5)
+    by IPAddress, Location, FailedAttempts, DistinctAccounts, TargetAccounts,
+       FirstAttempt, LastAttempt, AttackDurationMinutes, ResultTypes, UserAgents,
+       ConditionalAccessStatuses, Entity_IP
+| extend CompromiseDetected = SuccessCount > 0
 | project
     FirstAttempt,
     LastAttempt,
@@ -36,5 +54,11 @@ SigninLogs
     AttackDurationMinutes,
     ResultTypes,
     UserAgents,
+    ConditionalAccessStatuses,
+    SuccessCount,
+    SuccessfulAccounts,
+    CompromiseDetected,
+    RiskLevels,
+    RiskStates,
     Entity_IP
-| order by FailedAttempts desc
+| order by CompromiseDetected desc, FailedAttempts desc
