@@ -342,6 +342,24 @@ The workbook queries `SecurityIncident` and `SecurityAlert` tables, so it will o
 | IR Playbook (Logic App) | `playbooks/phishing-response/azuredeploy.json` | `az deployment group create` + manual API connection auth |
 | IR Dashboard (Workbook) | `workbooks/ir-dashboard.json` | Manual import via Sentinel Portal > Workbooks > Advanced Editor |
 
+## Why Terraform
+
+This project uses Terraform to manage Sentinel infrastructure rather than the Azure Portal, ARM templates, or Azure CLI scripts. Here's why:
+
+**Declarative state management** — Terraform tracks every resource it creates in a state file. Run `terraform plan` at any time to see exactly what exists, what's changed, and what would happen on the next apply. If someone modifies a rule in the portal, the next plan shows the drift. This is something ARM templates and CLI scripts can't do — they execute but don't track what they've created.
+
+**Idempotent deployments** — Running `terraform apply` twice produces the same result. If 10 of 12 rules deployed successfully and 2 failed (as happened during this project's deployment), re-running apply only creates the 2 missing rules. ARM templates and CLI scripts would either fail on duplicates or require you to track what succeeded yourself.
+
+**Dependency resolution** — Terraform understands that analytics rules depend on the Sentinel workspace, which depends on the Log Analytics workspace, which depends on the resource group. It builds and destroys resources in the correct order automatically. The `for_each` loop in `analytics-rules.tf` deploys all 12 detection rules in parallel while respecting the dependency on the workspace — no manual orchestration needed.
+
+**Change management through code review** — Every change to the detection pipeline goes through a pull request. Adding a new detection means adding a `.kql` file and a new entry in the `detection_files` local. Reviewers see exactly what's changing, CI validates the KQL metadata and Terraform syntax, and the merge history provides a complete audit trail of who changed what and when.
+
+**Reproducible environments** — `terraform destroy` tears down every resource. `terraform apply` rebuilds the entire environment from scratch. This makes it possible to spin up identical Sentinel labs for testing, training, or incident simulation without manual portal clicks. The entire environment is defined in 7 `.tf` files.
+
+**Cross-resource consistency** — The `analytics-rules.tf` file uses a single `for_each` resource block with a locals map to deploy all 12 rules. Every rule gets the same incident grouping configuration, the same entity mapping pattern, and the same suppression settings. Adding or modifying a rule means changing data in the map, not duplicating resource blocks. This eliminates the configuration drift that happens when rules are created one-by-one in the portal.
+
+**Drift detection** — If an analyst modifies a rule's severity or query in the Sentinel portal, the next `terraform plan` will show the difference and `terraform apply` will revert it to the version in code. This ensures the git repository remains the single source of truth for all detection rules, not the portal.
+
 ## License
 
 MIT
