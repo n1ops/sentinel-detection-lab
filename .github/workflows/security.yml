@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
 jobs:
   security:
     uses: n1ops/devsecops-pipeline-reference/.github/workflows/reusable-pipeline.yml@main
